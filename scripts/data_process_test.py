@@ -4,7 +4,8 @@ from torch_geometric.data import Data
 
 
 def show(s):
-    print(s + ' ' + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time())))
+    ts = time.strftime("%H:%M:%S", time.localtime())
+    print(f'[{ts}] {s}')
 
 def MyDatasetA(path, model):
     feature_num = 0
@@ -38,7 +39,7 @@ def MyDatasetA(path, model):
     nodeId_map = {}
     nodeA = []
 
-    show(path)
+    show(f'Loading: {path}')
 
     with open('groundtruth_nodeId.txt', 'w') as fw, \
          open('id_to_uuid.txt', 'w') as fw2, \

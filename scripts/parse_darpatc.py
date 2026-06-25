@@ -8,7 +8,8 @@ import glob
 from pathlib import Path
 
 def show(str_msg):
-    print(str_msg + ' ' + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time())))
+    ts = time.strftime("%H:%M:%S", time.localtime())
+    print(f'[{ts}] {str_msg}')
 
 tar_files = [
     'ta1-cadets-e3-official.json.tar.gz',
@@ -49,13 +50,14 @@ for path in path_list:
         now_path = path + '.' + str(i) if i != 0 else path
         if not osp.exists(now_path): 
             break
-        show(now_path)
+        show(f'Parsing (pass 1): {now_path}')
         cnt = 0
         with open(now_path, 'r') as f:
             for line in f:
                 cnt += 1
                 if cnt % notice_num == 0:
-                    print(cnt)
+                    ts = time.strftime("%H:%M:%S", time.localtime())
+                    print(f'[{ts}] {now_path} — {cnt:,} lines processed')
                 if 'com.bbn.tc.schema.avro.cdm18.Event' in line or 'com.bbn.tc.schema.avro.cdm18.Host' in line: 
                     continue
                 if 'com.bbn.tc.schema.avro.cdm18.TimeMarker' in line or 'com.bbn.tc.schema.avro.cdm18.StartMarker' in line: 
@@ -64,7 +66,8 @@ for path in path_list:
                     continue
                 uuid_match = pattern_uuid.findall(line)
                 if not uuid_match:
-                    print(line)
+                    ts = time.strftime("%H:%M:%S", time.localtime())
+                    print(f'[{ts}] WARNING: no UUID found in line: {line.rstrip()}')
                     continue
                 uuid = uuid_match[0]
                 subject_type = pattern_type.findall(line)
@@ -87,12 +90,14 @@ for path in path_list:
         now_path = path + '.' + str(i) if i != 0 else path
         if not osp.exists(now_path): 
             break
+        show(f'Parsing (pass 2): {now_path}')
         cnt = 0
         with open(now_path, 'r') as f, open(now_path + '.txt', 'w') as fw:
             for line in f:
                 cnt += 1
                 if cnt % notice_num == 0:
-                    print(cnt) 
+                    ts = time.strftime("%H:%M:%S", time.localtime())
+                    print(f'[{ts}] {now_path} — {cnt:,} lines processed')
 
                 if 'com.bbn.tc.schema.avro.cdm18.Event' in line:
                     edgeType_match = pattern_type.findall(line)

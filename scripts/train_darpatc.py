@@ -17,9 +17,9 @@ thre_map = {"cadets": 1.5, "trace": 1.0, "theia": 1.5, "fivedirections": 1.0}
 
 
 def show(*s):
-    for i in range(len(s)):
-        print(str(s[i]) + ' ', end='')
-    print(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time())))
+    ts = time.strftime("%H:%M:%S", time.localtime())
+    msg = ' '.join(str(x) for x in s)
+    print(f'[{ts}] {msg}')
 
 
 # ---------------------------------------------------------------------------
@@ -233,7 +233,8 @@ def validate(args, b_size, thre, graphId, device):
         '../graphchi-cpp-master/graph_data/darpatc/'
         + args.scene + '_test.txt'
     )
-    data, feature_num, label_num, adj, adj2, nodeA, _nodeA, _neighbour = MyDatasetA(path, 0)
+    data, feature_num, label_num, adj, adj2, nodeA, _nodeA, _neighbour = \
+        MyDatasetA(path, 0)
 
     if len(nodeA) == 0:
         show('WARNING: no ground-truth nodes found — skipping validation')
@@ -252,7 +253,6 @@ def validate(args, b_size, thre, graphId, device):
         if not osp.exists(model_path):
             break
 
-        print(f'validating in model {out_loop}')
         model.load_state_dict(
             torch.load(model_path, map_location=device, weights_only=True)
         )
@@ -262,7 +262,6 @@ def validate(args, b_size, thre, graphId, device):
 
         fp, tn = [], []
         final_test(model, loader, device, thre, data.test_mask, fp, tn)
-        print(f'fp and fn: {len(fp)} {len(tn)}')
 
         _fp = 0
         _tp = 0
@@ -281,8 +280,10 @@ def validate(args, b_size, thre, graphId, device):
 
         precision = _tp / (_tp + _fp + eps)
         recall    = _tp / len(nodeA)
-        print(f'Precision: {precision:.4f}')
-        print(f'Recall:    {recall:.4f}')
+        print(
+            f'[Model {out_loop}] Precision: {precision:.4f} | Recall: {recall:.4f}'
+            f' | FP: {_fp} | FN: {len(tn)}'
+        )
 
         if recall > 0.8 and precision > 0.7:
             # Passed — delete any surplus models that were never needed.
@@ -319,7 +320,7 @@ def train_pro(args, b_size, thre):
     print(data)
     print(f'feature {feature_num}; label {label_num}')
 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cpu')
     model  = SAGENet(feature_num, label_num).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01,
                                  weight_decay=5e-4)
@@ -331,7 +332,8 @@ def train_pro(args, b_size, thre):
     for epoch in range(1, 30):
         loss = train(model, train_loader, optimizer, device, data, thre)
         auc  = test(model, test_loader, device, thre, data.test_mask)
-        show(epoch, loss, auc)
+        ts = time.strftime("%H:%M:%S", time.localtime())
+        print(f'[{ts}] Epoch {epoch} | Loss: {loss:.4f} | Acc: {auc:.4f}')
 
     loop_num  = 0
     max_thre  = 3
@@ -375,7 +377,8 @@ def train_pro(args, b_size, thre):
         for epoch in range(1, 150):
             loss = train(model, train_loader, optimizer, device, data, thre)
             auc  = test(model, test_loader, device, thre, data.test_mask)
-            show(epoch, loss, auc)
+            ts = time.strftime("%H:%M:%S", time.localtime())
+            print(f'[{ts}] Epoch {epoch} | Loss: {loss:.4f} | Acc: {auc:.4f}')
             if loss < 1:
                 break
 

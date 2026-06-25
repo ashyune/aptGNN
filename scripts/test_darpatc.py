@@ -13,7 +13,8 @@ from data_process_test import MyDatasetA
 
 
 def show(str_msg):
-    print(str_msg + ' ' + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time())))
+    ts = time.strftime("%H:%M:%S", time.localtime())
+    print(f'[{ts}] {str_msg}')
 
 class SAGENet(torch.nn.Module):
     def __init__(self, in_channels, out_channels):
@@ -140,7 +141,7 @@ def main():
     data, feature_num, label_num, adj, adj2, nodeA, _nodeA, _neighbour = \
         MyDatasetA(path, args.model)
 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cpu')
     model  = SAGENet(feature_num, label_num).to(device)
     thre   = thre_map[args.scene]
 
@@ -171,10 +172,7 @@ def main():
 
         fp, tn, acc = run_test(model, data, b_size, device, thre)
 
-        print(
-            f'{loop_num}  acc:{acc:.4f}'
-            f'  fp:{len(fp)}  tn:{len(tn)}'
-        )
+        print(f'[Model {loop_num}] Acc: {acc:.4f} | FP: {len(fp)} | TN: {len(tn)}')
 
         # Remove correctly-classified nodes so subsequent models see only
         # the still-uncertain ones.

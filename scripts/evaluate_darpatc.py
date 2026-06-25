@@ -58,14 +58,10 @@ def main():
         elif i == 'fp': fp += 1
         elif i == 'fn': fn += 1
         
-    print(tp, fp, tn, fn)
     precision = tp / (tp + fp + eps)
     recall = tp / (tp + fn + eps)
     fscore = 2 * precision * recall / (precision + recall + eps)
-    
-    print('Precision: ', precision)
-    print('Recall: ', recall)
-    print('F-Score: ', fscore)
+    print(f'Precision: {precision:.4f} | Recall: {recall:.4f} | F-Score: {fscore:.4f}')
 
 if __name__ == '__main__':
     main()
