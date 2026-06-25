@@ -55,7 +55,15 @@ graphchi-cpp-master/graph_data/darpatc/*.json.*
 .ipynb_checkpoints/
 
 # Datasets / preprocessing
-graphchi-cpp-master/
+# Ignore everything inside dataset folders
+graphchi-cpp-master/graph_data/darpatc/*
+graphchi-cpp-master/graph_data/streamspot/*
+graphchi-cpp-master/graph_data/unicornsc/*
+
+# But keep the directory itself
+!graphchi-cpp-master/graph_data/darpatc/.gitkeep
+!graphchi-cpp-master/graph_data/streamspot/.gitkeep
+!graphchi-cpp-master/graph_data/unicornsc/.gitkeep
 
 # Example Models
 example_models/

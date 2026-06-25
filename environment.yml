@@ -69,4 +69,3 @@ dependencies:
       - urllib3==2.7.0
       - xxhash==3.7.0
       - yarl==1.24.2
-prefix: /home/tetsuya/miniconda3/envs/threatrace
