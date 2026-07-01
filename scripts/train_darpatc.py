@@ -62,6 +62,8 @@ def make_loader(data, mask, b_size, shuffle=False):
         input_nodes=mask,
         batch_size=b_size,
         shuffle=shuffle,
+        num_workers=4,
+        pin_memory=True,
     )
 
 
@@ -320,16 +322,18 @@ def train_pro(args, b_size, thre):
     print(data)
     print(f'feature {feature_num}; label {label_num}')
 
-    device = torch.device('cpu')
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    data.x = data.x.to(device)
+    data.y = data.y.to(device)
     model  = SAGENet(feature_num, label_num).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01,
                                  weight_decay=5e-4)
 
-    # Initial warm-up: 30 epochs over the full training set.
+    # Initial warm-up: 50 (30) epochs over the full training set.
     train_loader = make_loader(data, data.train_mask, b_size)
     test_loader  = make_loader(data, data.test_mask,  b_size)
 
-    for epoch in range(1, 30):
+    for epoch in range(1, 51):
         loss = train(model, train_loader, optimizer, device, data, thre)
         auc  = test(model, test_loader, device, thre, data.test_mask)
         ts = time.strftime("%H:%M:%S", time.localtime())
@@ -398,7 +402,8 @@ def main():
     assert args.model in ['SAGE']
     assert args.scene in ['cadets', 'trace', 'theia', 'fivedirections']
 
-    b_size = 5000
+    # b_size = 5000
+    b_size = 50000
     thre   = thre_map[args.scene]
 
     src = f'../groundtruth/{args.scene}.txt'

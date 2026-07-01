@@ -67,6 +67,8 @@ def make_loader(data, mask, b_size):
         input_nodes=mask,
         batch_size=b_size,
         shuffle=False,
+        num_workers=4,
+        pin_memory=True,
     )
 
 def run_test(model, data, b_size, device, thre):
@@ -141,7 +143,7 @@ def main():
     data, feature_num, label_num, adj, adj2, nodeA, _nodeA, _neighbour = \
         MyDatasetA(path, args.model)
 
-    device = torch.device('cpu')
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model  = SAGENet(feature_num, label_num).to(device)
     thre   = thre_map[args.scene]
 

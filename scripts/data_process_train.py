@@ -85,7 +85,5 @@ def MyDataset(path, model):
         test_mask=test_mask,
     )
 
-	# adj, adj2 placeholders kept for compatibility
-	# The last two zeros are ugly, but if train_darpatc.py expects five return values, changing it will break the caller.
     feature_num *= 2
     return data, feature_num, label_num
