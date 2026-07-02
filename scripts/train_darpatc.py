@@ -36,8 +36,8 @@ class SAGENet(torch.nn.Module):
     """
     def __init__(self, in_channels, out_channels):
         super().__init__()
-        self.conv1 = SAGEConv(in_channels, 32, normalize=False)
-        self.conv2 = SAGEConv(32, out_channels, normalize=False)
+        self.conv1 = SAGEConv(in_channels, 32, normalize=False, root_weight=False)
+        self.conv2 = SAGEConv(32, out_channels, normalize=False, root_weight=False)
 
     def forward(self, x, edge_index):
         x = F.relu(self.conv1(x, edge_index))
@@ -99,7 +99,7 @@ def _predict_batch(model, batch, device, thre):
     pro2 = pro.max(1)
 
     for i in range(batch.batch_size):
-        if pro2[0][i] <= 0 or pro1[0][i] / pro2[0][i] < thre:
+        if pro1[0][i] / pro2[0][i] < thre:
             pred[i] = 100
 
     return pred, y_true, n_ids
@@ -173,12 +173,12 @@ def _save_feature_log(data, nodes, graphId, loop_num, tag):
     y_list = data.y[nodes]
     n = len(x_list)
     if n > 1:
-        order   = np.argsort(y_list.numpy(), axis=0)
-        x_list  = x_list.numpy()[order]
-        y_list  = y_list.numpy()[order]
+        order   = np.argsort(y_list.cpu().numpy(), axis=0)
+        x_list  = x_list.cpu().numpy()[order]
+        y_list  = y_list.cpu().numpy()[order]
     else:
-        x_list = x_list.numpy()
-        y_list = y_list.numpy()
+        x_list = x_list.cpu().numpy()
+        y_list = y_list.cpu().numpy()
     with open(path, 'w') as fw:
         for i in range(n):
             fw.write(str(y_list[i]) + ':')
@@ -329,11 +329,11 @@ def train_pro(args, b_size, thre):
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01,
                                  weight_decay=5e-4)
 
-    # Initial warm-up: 50 (30) epochs over the full training set.
+    # Initial warm-up: 30 epochs over the full training set.
     train_loader = make_loader(data, data.train_mask, b_size)
-    test_loader  = make_loader(data, data.test_mask,  b_size)
+    test_loader  = make_loader(data, data.test_mask, b_size)
 
-    for epoch in range(1, 51):
+    for epoch in range(1, 30):
         loss = train(model, train_loader, optimizer, device, data, thre)
         auc  = test(model, test_loader, device, thre, data.test_mask)
         ts = time.strftime("%H:%M:%S", time.localtime())
@@ -402,8 +402,8 @@ def main():
     assert args.model in ['SAGE']
     assert args.scene in ['cadets', 'trace', 'theia', 'fivedirections']
 
-    # b_size = 5000
-    b_size = 50000
+    b_size = 5000
+    # b_size = 50000
     thre   = thre_map[args.scene]
 
     src = f'../groundtruth/{args.scene}.txt'

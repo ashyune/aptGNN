@@ -1,6 +1,7 @@
 import time
 import torch
 from torch_geometric.data import Data
+from torch_geometric.utils import add_self_loops
 
 
 def show(s):
@@ -100,10 +101,11 @@ def MyDatasetA(path, model):
         y[dstId] = dstType
 
     edge_index = torch.tensor([edge_s, edge_e], dtype=torch.long)
+    edge_index, _ = add_self_loops(edge_index, num_nodes=node_cnt)
 
     # Only test_mask is used downstream; train_mask is omitted intentionally.
     test_mask = torch.ones(node_cnt, dtype=torch.bool)
-
+    
     data = Data(
         x=x,
         y=y,

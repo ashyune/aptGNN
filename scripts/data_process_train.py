@@ -1,5 +1,6 @@
 import torch
 from torch_geometric.data import Data
+from torch_geometric.utils import add_self_loops
 
 
 def MyDataset(path, model):
@@ -77,6 +78,7 @@ def MyDataset(path, model):
     test_mask = train_mask.clone()
 
     edge_index = torch.tensor([edge_s, edge_e], dtype=torch.long)
+    edge_index, _ = add_self_loops(edge_index, num_nodes=node_cnt)
     data = Data(
         x=x,
         y=y,
