@@ -19,8 +19,8 @@ def show(str_msg):
 class SAGENet(torch.nn.Module):
     def __init__(self, in_channels, out_channels):
         super().__init__()
-        self.conv1 = SAGEConv(in_channels, 32, normalize=False)
-        self.conv2 = SAGEConv(32, out_channels, normalize=False)
+        self.conv1 = SAGEConv(in_channels, 32, normalize=False, root_weight=False)
+        self.conv2 = SAGEConv(32, out_channels, normalize=False, root_weight=False)
 
     def forward(self, x, edge_index):
         x = F.relu(self.conv1(x, edge_index))
@@ -55,7 +55,7 @@ def _predict_batch(model, batch, device, thre):
     pro2 = pro.max(1)
 
     for i in range(batch.batch_size):
-        if pro2[0][i] <= 0 or pro1[0][i] / pro2[0][i] < thre:
+        if pro1[0][i] / pro2[0][i] < thre:
             pred[i] = 100
 
     return pred, y_true, n_ids

@@ -323,6 +323,7 @@ def train_pro(args, b_size, thre):
     print(f'feature {feature_num}; label {label_num}')
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    # device = torch.device('cpu') # Use for strict CPU only
     data.x = data.x.to(device)
     data.y = data.y.to(device)
     model  = SAGENet(feature_num, label_num).to(device)
@@ -333,17 +334,26 @@ def train_pro(args, b_size, thre):
     train_loader = make_loader(data, data.train_mask, b_size)
     test_loader  = make_loader(data, data.test_mask, b_size)
 
+    warmup_start = time.time()
+    show('Warm-up training started')
+
     for epoch in range(1, 30):
         loss = train(model, train_loader, optimizer, device, data, thre)
         auc  = test(model, test_loader, device, thre, data.test_mask)
         ts = time.strftime("%H:%M:%S", time.localtime())
         print(f'[{ts}] Epoch {epoch} | Loss: {loss:.4f} | Acc: {auc:.4f}')
 
+    warmup_elapsed = time.time() - warmup_start
+    show(f'Warm-up training finished in {warmup_elapsed:.1f}s')
+
     loop_num  = 0
     max_thre  = 3
     bad_cnt   = 0
 
     while True:
+        round_start = time.time()
+        show(f'Pruning round {loop_num} started')
+
         fp, tn = [], []
 
         # Rebuild loaders so the current mask state is reflected.
@@ -357,9 +367,14 @@ def train_pro(args, b_size, thre):
             bad_cnt = 0
 
         if bad_cnt >= max_thre:
+            round_elapsed = time.time() - round_start
+            show(f'Pruning round {loop_num} found nothing left to prune '
+                 f'{bad_cnt} times in a row — stopping (took {round_elapsed:.1f}s)')
             break
 
         if len(tn) > 0:
+            show(f'Nodes left (unpruned): {len(fp)} | Nodes pruned (correctly classified): {len(tn)}')
+
             # Remove correctly-classified nodes from both masks.
             for i in tn:
                 data.train_mask[i] = False
@@ -371,6 +386,9 @@ def train_pro(args, b_size, thre):
             loop_num += 1
 
             if len(fp) == 0:
+                round_elapsed = time.time() - round_start
+                show(f'Pruning round {loop_num - 1} finished in {round_elapsed:.1f}s '
+                     f'(no misclassified nodes remain)')
                 break
 
         # Re-train on the pruned mask.
@@ -385,6 +403,9 @@ def train_pro(args, b_size, thre):
             print(f'[{ts}] Epoch {epoch} | Loss: {loss:.4f} | Acc: {auc:.4f}')
             if loss < 1:
                 break
+
+        round_elapsed = time.time() - round_start
+        show(f'Pruning round {loop_num - 1} finished in {round_elapsed:.1f}s')
 
     show(f'Finish training graph {graphId}')
     return graphId, device
