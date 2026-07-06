@@ -14,6 +14,8 @@ from data_process_train import MyDataset
 from data_process_test import MyDatasetA
 
 thre_map = {"cadets": 1.5, "trace": 1.0, "theia": 1.5, "fivedirections": 1.0}
+NUM_WINDOWS = 5     # fixed chronological chunks per scene
+MEM_DIM = 64        # size of the global cross-window memory vector
 
 
 def show(*s):
@@ -26,24 +28,52 @@ def show(*s):
 # Model
 # ---------------------------------------------------------------------------
 
-class SAGENet(torch.nn.Module):
-    """Two-layer GraphSAGE classifier.
+class SAGEMemNet(torch.nn.Module):
+    """Two-layer GraphSAGE classifier + a persistent, GRU-updated GLOBAL
+    memory vector carried across time windows.
 
-    forward() accepts a NeighborLoader batch object.  The caller is
-    responsible for slicing out[:batch.batch_size] before computing loss,
-    accuracy, or threshold logic — this keeps the module itself unaware of
-    the seed-node convention so it can also be used for full-graph inference.
+    Why global rather than per-node: this vector is meant to transfer
+    between the training scene graph and the separate test scene graph
+    (validate()), which don't share a node-id space. A per-node memory
+    bank couldn't cross that boundary; a single "what has the whole
+    system looked like so far" vector can.
+
+    The memory update (readout + GRU) happens INSIDE forward(), before
+    broadcasting back into node features for classification -- so the
+    ordinary classification loss is what trains the GRU/readout weights.
+    Only the carried-over `state` tensor gets detached by the caller
+    between calls (truncated BPTT of depth 1), which is what keeps the
+    backward graph bounded no matter how many windows/batches a full
+    training run covers.
+
+    forward() accepts a NeighborLoader batch's x/edge_index plus the
+    incoming memory state, and returns (log_probs, updated_state). The
+    caller slices out[:batch.batch_size] before loss/accuracy/threshold
+    logic, same convention as before.
     """
-    def __init__(self, in_channels, out_channels):
+    def __init__(self, in_channels, out_channels, mem_dim=MEM_DIM):
         super().__init__()
+        self.mem_dim = mem_dim
         self.conv1 = SAGEConv(in_channels, 32, normalize=False)
+        self.readout = torch.nn.Linear(32, mem_dim)
+        self.gru = torch.nn.GRUCell(mem_dim, mem_dim)
+        self.ctx_proj = torch.nn.Linear(mem_dim, 32)
         self.conv2 = SAGEConv(32, out_channels, normalize=False)
 
-    def forward(self, x, edge_index):
-        x = F.relu(self.conv1(x, edge_index))
-        x = F.dropout(x, p=0.5, training=self.training)
-        x = self.conv2(x, edge_index)
-        return F.log_softmax(x, dim=1)
+    def forward(self, x, edge_index, prev_state):
+        h = F.relu(self.conv1(x, edge_index))                # [N, 32]
+
+        g = self.readout(h).mean(dim=0, keepdim=True)          # [1, mem_dim]
+        new_state = self.gru(g, prev_state)                    # [1, mem_dim], attached
+
+        ctx = self.ctx_proj(new_state).expand(h.size(0), -1)   # broadcast to every node
+        h = F.dropout(h + ctx, p=0.5, training=self.training)
+
+        out = self.conv2(h, edge_index)
+        return F.log_softmax(out, dim=1), new_state
+
+    def init_state(self, device):
+        return torch.zeros(1, self.mem_dim, device=device)
 
 
 # ---------------------------------------------------------------------------
@@ -53,8 +83,9 @@ class SAGENet(torch.nn.Module):
 def make_loader(data, mask, b_size, shuffle=False):
     """Build a NeighborLoader scoped to the nodes indicated by *mask*.
 
-    Called after every mask mutation so the sampler sees the current set of
-    active nodes rather than the stale set from construction time.
+    shuffle stays False by default: batch order is our only proxy for
+    intra-window chronology, and the memory update relies on batches
+    being consumed in a stable order.
     """
     return NeighborLoader(
         data,
@@ -69,20 +100,19 @@ def make_loader(data, mask, b_size, shuffle=False):
 # Shared prediction helper
 # ---------------------------------------------------------------------------
 
-def _predict_batch(model, batch, device, thre):
+def _predict_batch(model, batch, device, thre, state):
     """Run forward pass and apply confidence-ratio threshold for one batch.
 
     Returns
     -------
-    pred   : [batch_size] — predicted class (100 = below-threshold / uncertain)
-    y_true : [batch_size] — ground-truth labels for seed nodes
-    n_ids  : [batch_size] — global node ids for seed nodes
+    pred      : [batch_size] — predicted class (100 = below-threshold / uncertain)
+    y_true    : [batch_size] — ground-truth labels for seed nodes
+    n_ids     : [batch_size] — global node ids for seed nodes
+    new_state : [1, mem_dim] — memory state after seeing this batch
     """
     batch = batch.to(device)
-    out = model(batch.x, batch.edge_index)
+    out, new_state = model(batch.x, batch.edge_index, state)
 
-    # Slice to seed nodes only — the remaining rows are sampled neighbours
-    # included only for message-passing context.
     out    = out[:batch.batch_size]
     y_true = batch.y[:batch.batch_size]
     n_ids  = batch.n_id[:batch.batch_size]
@@ -91,7 +121,6 @@ def _predict_batch(model, batch, device, thre):
     pro  = F.softmax(out, dim=1)
     pro1 = pro.max(1)
 
-    # Zero out the top class so we can find the second-best confidence.
     for i in range(batch.batch_size):
         pro[i][pro1[1][i]] = -1
     pro2 = pro.max(1)
@@ -100,56 +129,54 @@ def _predict_batch(model, batch, device, thre):
         if pro2[0][i] <= 0 or pro1[0][i] / pro2[0][i] < thre:
             pred[i] = 100
 
-    return pred, y_true, n_ids
+    return pred, y_true, n_ids, new_state
 
 
 # ---------------------------------------------------------------------------
 # Train / eval loops
 # ---------------------------------------------------------------------------
 
-def train(model, loader, optimizer, device, data, thre):
+def train(model, loader, optimizer, device, data, thre, state):
+    """Returns (avg_loss, new_state). `state` updates batch-by-batch as the
+    loader streams through this window's nodes; the caller carries the
+    final detached value into the next epoch / window."""
     model.train()
     total_loss = 0
     for batch in loader:
         batch = batch.to(device)
         optimizer.zero_grad()
-        out  = model(batch.x, batch.edge_index)
-        loss = F.nll_loss(out[:batch.batch_size],
-                          batch.y[:batch.batch_size])
+        out, new_state = model(batch.x, batch.edge_index, state)
+        loss = F.nll_loss(out[:batch.batch_size], batch.y[:batch.batch_size])
         loss.backward()
         optimizer.step()
         total_loss += loss.item() * batch.batch_size
+        state = new_state.detach()       # truncate BPTT at the batch boundary
     train_node_count = data.train_mask.sum().item()
-    return total_loss / train_node_count if train_node_count > 0 else 0.0
+    avg_loss = total_loss / train_node_count if train_node_count > 0 else 0.0
+    return avg_loss, state
 
 
-def test(model, loader, device, thre, mask):
-    """Return accuracy over the nodes covered by *loader*.
-
-    *mask* is used only to compute the denominator — the loader itself
-    already restricts which nodes are evaluated.
-    """
+def test(model, loader, device, thre, mask, state):
+    """Accuracy over the nodes covered by *loader*, using a FIXED memory
+    state for every batch (no intra-eval drift, order-independent result).
+    Does not mutate the caller's persistent state."""
     model.eval()
     correct = 0
     with torch.no_grad():
         for batch in loader:
-            pred, y_true, _ = _predict_batch(model, batch, device, thre)
+            pred, y_true, _, _ = _predict_batch(model, batch, device, thre, state)
             correct += pred.eq(y_true).sum().item()
     denom = mask.sum().item()
     return correct / denom if denom > 0 else 0.0
 
 
-def final_test(model, loader, device, thre, mask, fp, tn):
-    """Like test() but also populates *fp* and *tn* with global node ids.
-
-    *fp* and *tn* are mutated in-place so the caller can accumulate across
-    multiple calls if needed.
-    """
+def final_test(model, loader, device, thre, mask, fp, tn, state):
+    """Like test() but also populates *fp* and *tn* with global node ids."""
     model.eval()
     correct = 0
     with torch.no_grad():
         for batch in loader:
-            pred, y_true, n_ids = _predict_batch(model, batch, device, thre)
+            pred, y_true, n_ids, _ = _predict_batch(model, batch, device, thre, state)
             for i in range(batch.batch_size):
                 nid = int(n_ids[i].item())
                 if y_true[i] != pred[i]:
@@ -186,17 +213,21 @@ def _save_feature_log(data, nodes, graphId, loop_num, tag):
 
 
 # ---------------------------------------------------------------------------
-# Model-cleanup helper used by validate() and main()
+# Model-cleanup helpers used by validate() and main()
 # ---------------------------------------------------------------------------
 
 def _delete_model_files(graphId, from_loop):
-    """Remove model_N, fp_feature_label_*, tn_feature_label_* from *from_loop* upward."""
+    """Remove model_N, memory_N, fp_feature_label_*, tn_feature_label_* from
+    *from_loop* upward."""
     loop = from_loop
     while True:
         mp = f'../models/model_{loop}'
         if not osp.exists(mp):
             break
         os.remove(mp)
+        mem_p = f'../models/memory_{loop}.pt'
+        if osp.exists(mem_p):
+            os.remove(mem_p)
         for tag in ('fp', 'tn'):
             p = f'../models/{tag}_feature_label_{graphId}_{loop}.txt'
             if osp.exists(p):
@@ -208,6 +239,7 @@ def _delete_all_model_files():
     """Wipe all model artefacts between outer training attempts."""
     for pattern in (
         '../models/model_*',
+        '../models/memory_*.pt',
         '../models/tn_feature_label_*',
         '../models/fp_feature_label_*',
     ):
@@ -223,10 +255,9 @@ def _delete_all_model_files():
 # ---------------------------------------------------------------------------
 
 def validate(args, b_size, thre, graphId, device):
-    """Evaluate saved models against the test snapshot.
-
-    Returns 1 if precision/recall thresholds are met, else 0.
-    graphId is passed explicitly (not a global) so validate() is self-contained.
+    """Evaluate saved models (and their matching memory snapshots) against
+    the test snapshot. Returns 1 if precision/recall thresholds are met,
+    else 0.
     """
     show('Start validating')
     path = (
@@ -241,9 +272,7 @@ def validate(args, b_size, thre, graphId, device):
         return 0
 
     print(data)
-    model = SAGENet(feature_num, label_num).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.01,
-                                 weight_decay=5e-4)
+    model = SAGEMemNet(feature_num, label_num).to(device)
     eps = 1e-10
 
     out_loop = -1
@@ -257,11 +286,20 @@ def validate(args, b_size, thre, graphId, device):
             torch.load(model_path, map_location=device, weights_only=True)
         )
 
+        # Load the memory snapshot that matches this checkpoint. Falls back
+        # to a zero vector if it's missing (e.g. old checkpoints from before
+        # this feature existed).
+        mem_path = f'../models/memory_{out_loop}.pt'
+        if osp.exists(mem_path):
+            state = torch.load(mem_path, map_location=device)['state']
+        else:
+            state = model.init_state(device)
+
         # Rebuild loader each iteration so mask mutations are honoured.
         loader = make_loader(data, data.test_mask, b_size)
 
         fp, tn = [], []
-        final_test(model, loader, device, thre, data.test_mask, fp, tn)
+        final_test(model, loader, device, thre, data.test_mask, fp, tn, state)
 
         _fp = 0
         _tp = 0
@@ -286,15 +324,12 @@ def validate(args, b_size, thre, graphId, device):
         )
 
         if recall > 0.8 and precision > 0.7:
-            # Passed — delete any surplus models that were never needed.
             _delete_model_files(graphId, out_loop + 1)
             return 1
 
         if recall <= 0.8:
             return 0
 
-        # Remove correctly-classified nodes from the test mask and continue
-        # to the next saved model.
         for j in tn:
             data.test_mask[j] = False
 
@@ -306,7 +341,10 @@ def validate(args, b_size, thre, graphId, device):
 # ---------------------------------------------------------------------------
 
 def train_pro(args, b_size, thre):
-    """Train on the training snapshot.  Returns graphId for use by validate()."""
+    """Train sequentially over NUM_WINDOWS chronological windows of the
+    training snapshot, carrying both model weights AND the global memory
+    state forward from window to window. Returns graphId for validate().
+    """
     subprocess.run(['python', 'setup.py'], check=True)
 
     path = (
@@ -314,75 +352,69 @@ def train_pro(args, b_size, thre):
         + args.scene + '_train.txt'
     )
     graphId = 0
-    show(f'Start training graph {graphId}')
-
-    data, feature_num, label_num = MyDataset(path, 0)
-    print(data)
-    print(f'feature {feature_num}; label {label_num}')
-
     device = torch.device('cpu')
-    model  = SAGENet(feature_num, label_num).to(device)
+
+    windows, feature_num, label_num = MyDataset(path, NUM_WINDOWS)
+    show(f'feature {feature_num}; label {label_num}; {len(windows)} windows')
+
+    model = SAGEMemNet(feature_num, label_num).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01,
                                  weight_decay=5e-4)
 
-    # Initial warm-up: 30 epochs over the full training set.
-    train_loader = make_loader(data, data.train_mask, b_size)
-    test_loader  = make_loader(data, data.test_mask,  b_size)
+    state = model.init_state(device)   # persists across ALL windows below
+    global_loop = 0
+    max_thre = 3
 
-    for epoch in range(1, 30):
-        loss = train(model, train_loader, optimizer, device, data, thre)
-        auc  = test(model, test_loader, device, thre, data.test_mask)
-        ts = time.strftime("%H:%M:%S", time.localtime())
-        print(f'[{ts}] Epoch {epoch} | Loss: {loss:.4f} | Acc: {auc:.4f}')
+    for w_idx, data in enumerate(windows):
+        show(f'--- window {w_idx}/{len(windows) - 1} '
+             f'({int(data.active_mask.sum().item())} active nodes) ---')
 
-    loop_num  = 0
-    max_thre  = 3
-    bad_cnt   = 0
-
-    while True:
-        fp, tn = [], []
-
-        # Rebuild loaders so the current mask state is reflected.
-        test_loader = make_loader(data, data.test_mask, b_size)
-
-        final_test(model, test_loader, device, thre, data.test_mask, fp, tn)
-
-        if len(tn) == 0:
-            bad_cnt += 1
-        else:
-            bad_cnt = 0
-
-        if bad_cnt >= max_thre:
-            break
-
-        if len(tn) > 0:
-            # Remove correctly-classified nodes from both masks.
-            for i in tn:
-                data.train_mask[i] = False
-                data.test_mask[i]  = False
-
-            _save_feature_log(data, fp, graphId, loop_num, 'fp')
-            _save_feature_log(data, tn, graphId, loop_num, 'tn')
-            torch.save(model.state_dict(), f'../models/model_{loop_num}')
-            loop_num += 1
-
-            if len(fp) == 0:
-                break
-
-        # Re-train on the pruned mask.
-        auc = 0.0
+        # Initial warm-up: 30 epochs over this window's active nodes.
         train_loader = make_loader(data, data.train_mask, b_size)
         test_loader  = make_loader(data, data.test_mask,  b_size)
 
-        for epoch in range(1, 150):
-            loss = train(model, train_loader, optimizer, device, data, thre)
-            auc  = test(model, test_loader, device, thre, data.test_mask)
+        for epoch in range(1, 30):
+            loss, state = train(model, train_loader, optimizer, device, data, thre, state)
+            auc = test(model, test_loader, device, thre, data.test_mask, state)
             ts = time.strftime("%H:%M:%S", time.localtime())
-            print(f'[{ts}] Epoch {epoch} | Loss: {loss:.4f} | Acc: {auc:.4f}')
-            if loss < 1:
+            print(f'[{ts}] window {w_idx} epoch {epoch} | Loss: {loss:.4f} | Acc: {auc:.4f}')
+
+        bad_cnt = 0
+        while True:
+            fp, tn = [], []
+            test_loader = make_loader(data, data.test_mask, b_size)
+            final_test(model, test_loader, device, thre, data.test_mask, fp, tn, state)
+
+            bad_cnt = bad_cnt + 1 if len(tn) == 0 else 0
+            if bad_cnt >= max_thre:
                 break
 
-    show(f'Finish training graph {graphId}')
+            if len(tn) > 0:
+                for i in tn:
+                    data.train_mask[i] = False
+                    data.test_mask[i]  = False
+
+                _save_feature_log(data, fp, graphId, global_loop, 'fp')
+                _save_feature_log(data, tn, graphId, global_loop, 'tn')
+                torch.save(model.state_dict(), f'../models/model_{global_loop}')
+                torch.save({'state': state.clone()}, f'../models/memory_{global_loop}.pt')
+                global_loop += 1
+
+                if len(fp) == 0:
+                    break
+
+            train_loader = make_loader(data, data.train_mask, b_size)
+            test_loader  = make_loader(data, data.test_mask,  b_size)
+
+            for epoch in range(1, 150):
+                loss, state = train(model, train_loader, optimizer, device, data, thre, state)
+                auc = test(model, test_loader, device, thre, data.test_mask, state)
+                ts = time.strftime("%H:%M:%S", time.localtime())
+                print(f'[{ts}] window {w_idx} refine epoch {epoch} | Loss: {loss:.4f} | Acc: {auc:.4f}')
+                if loss < 1:
+                    break
+
+    show(f'Finish training graph {graphId} across {len(windows)} windows')
     return graphId, device
 
 
