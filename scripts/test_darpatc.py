@@ -11,24 +11,48 @@ from torch_geometric.loader import NeighborLoader
 from torch_geometric.nn import SAGEConv
 from data_process_test import MyDatasetA
 
+MEM_DIM = 64  # value used in train_darpatc.py
+
 
 def show(str_msg):
     ts = time.strftime("%H:%M:%S", time.localtime())
     print(f'[{ts}] {str_msg}')
 
-class SAGENet(torch.nn.Module):
-    def __init__(self, in_channels, out_channels):
+
+class SAGEMemNet(torch.nn.Module):
+    """Same architecture as train_darpatc.py's SAGEMemNet -- duplicated here
+    because this script is standalone and doesn't import from
+    train_darpatc.py.
+    """
+    def __init__(self, in_channels, out_channels, mem_dim=MEM_DIM):
         super().__init__()
+        self.mem_dim = mem_dim
         self.conv1 = SAGEConv(in_channels, 32, normalize=False)
+        self.readout = torch.nn.Linear(32, mem_dim)
+        self.readout_norm = torch.nn.LayerNorm(mem_dim)
+        self.gru = torch.nn.GRUCell(mem_dim, mem_dim)
+        self.ctx_proj = torch.nn.Linear(mem_dim, 32)
+        self.ctx_gate = torch.nn.Parameter(torch.tensor(-2.0))
         self.conv2 = SAGEConv(32, out_channels, normalize=False)
 
-    def forward(self, x, edge_index):
-        x = F.relu(self.conv1(x, edge_index))
-        x = F.dropout(x, p=0.5, training=self.training)
-        x = self.conv2(x, edge_index)
-        return F.log_softmax(x, dim=1)
+    def forward(self, x, edge_index, prev_state):
+        h = F.relu(self.conv1(x, edge_index))
 
-def _predict_batch(model, batch, device, thre):
+        g = self.readout_norm(self.readout(h).mean(dim=0, keepdim=True))
+        new_state = torch.tanh(self.gru(g, prev_state))
+
+        ctx = self.ctx_proj(new_state).expand(h.size(0), -1)
+        gate = torch.sigmoid(self.ctx_gate)
+        h = F.dropout(h + gate * ctx, p=0.5, training=self.training)
+
+        out = self.conv2(h, edge_index)
+        return F.log_softmax(out, dim=1), new_state
+
+    def init_state(self, device):
+        return torch.zeros(1, self.mem_dim, device=device)
+
+
+def _predict_batch(model, batch, device, thre, state):
     """Run forward pass and apply confidence-ratio threshold for one batch.
 
     Returns
@@ -38,7 +62,7 @@ def _predict_batch(model, batch, device, thre):
     n_ids  : [batch_size] — global node ids for seed nodes only
     """
     batch = batch.to(device)
-    out = model(batch.x, batch.edge_index)
+    out, _ = model(batch.x, batch.edge_index, state)
 
     # Slice to seed nodes — remaining rows are sampled neighbours used
     # only for message-passing context.
@@ -60,6 +84,7 @@ def _predict_batch(model, batch, device, thre):
 
     return pred, y_true, n_ids
 
+
 def make_loader(data, mask, b_size):
     return NeighborLoader(
         data,
@@ -69,8 +94,11 @@ def make_loader(data, mask, b_size):
         shuffle=False,
     )
 
-def run_test(model, data, b_size, device, thre):
-    """Evaluate model over data.test_mask.
+
+def run_test(model, data, b_size, device, thre, state):
+    """Evaluate model over data.test_mask, using a FIXED memory state for
+    every batch (same convention as train_darpatc.py's test()/final_test():
+    no intra-eval drift, order-independent result).
 
     Rebuilds the loader from the current mask state on every call so that
     mask mutations between iterations are correctly reflected.
@@ -88,7 +116,7 @@ def run_test(model, data, b_size, device, thre):
 
     with torch.no_grad():
         for batch in loader:
-            pred, y_true, n_ids = _predict_batch(model, batch, device, thre)
+            pred, y_true, n_ids = _predict_batch(model, batch, device, thre, state)
             for i in range(batch.batch_size):
                 nid = int(n_ids[i].item())
                 if y_true[i] != pred[i]:
@@ -100,6 +128,7 @@ def run_test(model, data, b_size, device, thre):
     denom = data.test_mask.sum().item()
     acc = correct / denom if denom > 0 else 0.0
     return fp, tn, acc
+
 
 def _find_model_indices(model_dir='../models'):
     """Return a sorted list of integer indices for files named model_N.
@@ -114,6 +143,7 @@ def _find_model_indices(model_dir='../models'):
         if m:
             indices.append(int(m.group(1)))
     return sorted(indices)
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -142,7 +172,7 @@ def main():
         MyDatasetA(path, args.model)
 
     device = torch.device('cpu')
-    model  = SAGENet(feature_num, label_num).to(device)
+    model  = SAGEMemNet(feature_num, label_num).to(device)
     thre   = thre_map[args.scene]
 
     # --- Discover saved models ---
@@ -153,7 +183,7 @@ def main():
 
     # --- Iterative evaluation loop ---
     # For each saved model (in index order):
-    #   1. Load weights.
+    #   1. Load weights + the memory snapshot saved alongside that checkpoint.
     #   2. Evaluate over currently-active test nodes.
     #   3. Remove correctly-classified nodes from test_mask.
     #   4. Stop early if accuracy reaches 1.0 (no remaining errors).
@@ -170,7 +200,14 @@ def main():
             torch.load(model_path, map_location=device, weights_only=True)
         )
 
-        fp, tn, acc = run_test(model, data, b_size, device, thre)
+        mem_path = f'../models/memory_{loop_num}.pt'
+        if osp.exists(mem_path):
+            state = torch.load(mem_path, map_location=device)['state']
+        else:
+            show(f'WARNING: memory_{loop_num}.pt not found — using zero state.')
+            state = model.init_state(device)
+
+        fp, tn, acc = run_test(model, data, b_size, device, thre, state)
 
         print(f'[Model {loop_num}] Acc: {acc:.4f} | FP: {len(fp)} | TN: {len(tn)}')
 

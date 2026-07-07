@@ -14,7 +14,9 @@ from data_process_train import MyDataset
 from data_process_test import MyDatasetA
 
 thre_map = {"cadets": 1.5, "trace": 1.0, "theia": 1.5, "fivedirections": 1.0}
-NUM_WINDOWS = 5     # fixed chronological chunks per scene
+NUM_WINDOWS = 3     # fixed chronological chunks per scene — 5 was too fine-
+                    # grained for cadets: middle windows never stabilized
+                    # before running out of refine-epoch budget
 MEM_DIM = 64        # size of the global cross-window memory vector
 
 
@@ -54,20 +56,27 @@ class SAGEMemNet(torch.nn.Module):
     def __init__(self, in_channels, out_channels, mem_dim=MEM_DIM):
         super().__init__()
         self.mem_dim = mem_dim
-        self.conv1 = SAGEConv(in_channels, 32, normalize=False)
+        self.conv1 = SAGEConv(in_channels, 32, normalize=False) #root_weight = false
         self.readout = torch.nn.Linear(32, mem_dim)
+        self.readout_norm = torch.nn.LayerNorm(mem_dim)   # bounds the GRU's input
         self.gru = torch.nn.GRUCell(mem_dim, mem_dim)
         self.ctx_proj = torch.nn.Linear(mem_dim, 32)
+        # Learnable scalar gate (init near 0) so the context term starts as
+        # a no-op and the model only leans on memory once it's earned a
+        # role in the loss, instead of immediately swamping h with an
+        # untrained, potentially large ctx vector from step 1.
+        self.ctx_gate = torch.nn.Parameter(torch.tensor(-2.0))
         self.conv2 = SAGEConv(32, out_channels, normalize=False)
 
     def forward(self, x, edge_index, prev_state):
-        h = F.relu(self.conv1(x, edge_index))                # [N, 32]
+        h = F.relu(self.conv1(x, edge_index))                       # [N, 32]
 
-        g = self.readout(h).mean(dim=0, keepdim=True)          # [1, mem_dim]
-        new_state = self.gru(g, prev_state)                    # [1, mem_dim], attached
+        g = self.readout_norm(self.readout(h).mean(dim=0, keepdim=True))  # [1, mem_dim], bounded
+        new_state = torch.tanh(self.gru(g, prev_state))                  # keep state in [-1, 1]
 
-        ctx = self.ctx_proj(new_state).expand(h.size(0), -1)   # broadcast to every node
-        h = F.dropout(h + ctx, p=0.5, training=self.training)
+        ctx = self.ctx_proj(new_state).expand(h.size(0), -1)              # broadcast to every node
+        gate = torch.sigmoid(self.ctx_gate)                               # starts ~0.12, learns upward
+        h = F.dropout(h + gate * ctx, p=0.5, training=self.training)
 
         out = self.conv2(h, edge_index)
         return F.log_softmax(out, dim=1), new_state
