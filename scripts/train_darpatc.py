@@ -14,9 +14,24 @@ from data_process_train import MyDataset
 from data_process_test import MyDatasetA
 
 thre_map = {"cadets": 1.5, "trace": 1.0, "theia": 1.5, "fivedirections": 1.0}
-NUM_WINDOWS = 3     # fixed chronological chunks per scene — 5 was too fine-
-                    # grained for cadets: middle windows never stabilized
-                    # before running out of refine-epoch budget
+NUM_WINDOWS = 3     # DEFAULT chronological chunks per scene; overridable via
+                    # --num_windows. 5 was too fine-grained for cadets at
+                    # the OLD (file-order) chunking -- see MIN_WINDOW_EDGES
+                    # below for the safeguard that now applies regardless
+                    # of how high --num_windows is set.
+MIN_WINDOW_EDGES = 5000    # floor: a window's own edge_index needs enough
+                            # edges for SAGEConv to have real neighbourhoods
+                            # to aggregate over. If --num_windows would make
+                            # windows thinner than this, we silently reduce
+                            # the effective window count instead of creating
+                            # message-passing-starved windows. Lowered from
+                            # 20000 -> 5000 to allow much finer windows (was
+                            # capping --num_windows well below what's needed
+                            # to approach a teammate's ~87-window setup);
+                            # 5000 matches the smaller end of their tested
+                            # edges-per-window range as a reference floor,
+                            # not a tuned value -- revisit if windows this
+                            # thin turn out unstable.
 MEM_DIM = 64        # size of the global cross-window memory vector
 
 
@@ -56,7 +71,7 @@ class SAGEMemNet(torch.nn.Module):
     def __init__(self, in_channels, out_channels, mem_dim=MEM_DIM):
         super().__init__()
         self.mem_dim = mem_dim
-        self.conv1 = SAGEConv(in_channels, 32, normalize=False) #root_weight = false
+        self.conv1 = SAGEConv(in_channels, 32, normalize=False)
         self.readout = torch.nn.Linear(32, mem_dim)
         self.readout_norm = torch.nn.LayerNorm(mem_dim)   # bounds the GRU's input
         self.gru = torch.nn.GRUCell(mem_dim, mem_dim)
@@ -349,8 +364,8 @@ def validate(args, b_size, thre, graphId, device):
 # train_pro()
 # ---------------------------------------------------------------------------
 
-def train_pro(args, b_size, thre):
-    """Train sequentially over NUM_WINDOWS chronological windows of the
+def train_pro(args, b_size, thre, num_windows=NUM_WINDOWS):
+    """Train sequentially over `num_windows` chronological windows of the
     training snapshot, carrying both model weights AND the global memory
     state forward from window to window. Returns graphId for validate().
     """
@@ -363,8 +378,8 @@ def train_pro(args, b_size, thre):
     graphId = 0
     device = torch.device('cpu')
 
-    windows, feature_num, label_num = MyDataset(path, NUM_WINDOWS)
-    show(f'feature {feature_num}; label {label_num}; {len(windows)} windows')
+    windows, feature_num, label_num = MyDataset(path, num_windows, min_edges_per_window=MIN_WINDOW_EDGES)
+    show(f'feature {feature_num}; label {label_num}; {len(windows)} windows (requested {num_windows})')
 
     model = SAGEMemNet(feature_num, label_num).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01,
@@ -415,13 +430,27 @@ def train_pro(args, b_size, thre):
             train_loader = make_loader(data, data.train_mask, b_size)
             test_loader  = make_loader(data, data.test_mask,  b_size)
 
+            last_loss = None
             for epoch in range(1, 150):
                 loss, state = train(model, train_loader, optimizer, device, data, thre, state)
                 auc = test(model, test_loader, device, thre, data.test_mask, state)
                 ts = time.strftime("%H:%M:%S", time.localtime())
                 print(f'[{ts}] window {w_idx} refine epoch {epoch} | Loss: {loss:.4f} | Acc: {auc:.4f}')
+                last_loss = loss
                 if loss < 1:
                     break
+
+            # If we broke out on epoch 1 because the carried-over weights
+            # were already converged, the model hasn't actually adapted to
+            # the newly-pruned mask at all -- that's what was causing dozens
+            # of near-identical, zero-progress prune/retrain cycles in a
+            # row. Force a couple more epochs so each cycle does real work.
+            if last_loss is not None and last_loss < 1:
+                for extra_epoch in range(2, 6):
+                    loss, state = train(model, train_loader, optimizer, device, data, thre, state)
+                    auc = test(model, test_loader, device, thre, data.test_mask, state)
+                    ts = time.strftime("%H:%M:%S", time.localtime())
+                    print(f'[{ts}] window {w_idx} refine (extra) epoch {extra_epoch} | Loss: {loss:.4f} | Acc: {auc:.4f}')
 
     show(f'Finish training graph {graphId} across {len(windows)} windows')
     return graphId, device
@@ -435,6 +464,11 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', type=str, default='SAGE')
     parser.add_argument('--scene', type=str, default='theia')
+    parser.add_argument('--num_windows', type=int, default=NUM_WINDOWS,
+                         help='Requested chronological window count. May be '
+                              'reduced automatically if it would make windows '
+                              f'thinner than MIN_WINDOW_EDGES ({MIN_WINDOW_EDGES} '
+                              'edges) -- see the printed message at startup.')
     args = parser.parse_args()
     assert args.model in ['SAGE']
     assert args.scene in ['cadets', 'trace', 'theia', 'fivedirections']
@@ -448,7 +482,7 @@ def main():
     shutil.copy2(src, 'groundtruth_uuid.txt')
 
     while True:
-        graphId, device = train_pro(args, b_size, thre)
+        graphId, device = train_pro(args, b_size, thre, num_windows=args.num_windows)
         flag = validate(args, b_size, thre, graphId, device)
         if flag == 1:
             break
