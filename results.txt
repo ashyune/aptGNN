@@ -1,0 +1,58 @@
+[16:21:09] Loading: ../graphchi-cpp-master/graph_data/darpatc/cadets_test.txt
+Data(x=[357174, 56], edge_index=[2, 4316489], y=[357174], test_mask=[357174])
+[Model 0] Precision: 0.0408 | Recall: 1.0000 | FP: 302390 | TN: 38633
+[Model 1] Precision: 0.0410 | Recall: 1.0000 | FP: 300847 | TN: 2131
+[Model 2] Precision: 0.0411 | Recall: 1.0000 | FP: 299850 | TN: 1123
+[Model 3] Precision: 0.0412 | Recall: 1.0000 | FP: 298792 | TN: 1060
+[Model 4] Precision: 0.0412 | Recall: 0.9999 | FP: 298758 | TN: 76
+[Model 5] Precision: 0.0412 | Recall: 0.9999 | FP: 298697 | TN: 61
+[Model 6] Precision: 0.0413 | Recall: 0.9998 | FP: 298502 | TN: 196
+[Model 7] Precision: 0.0415 | Recall: 0.9998 | FP: 296576 | TN: 1929
+[Model 8] Precision: 0.0415 | Recall: 0.9998 | FP: 296524 | TN: 54
+[Model 9] Precision: 0.0415 | Recall: 0.9998 | FP: 296519 | TN: 5
+[Model 10] Precision: 0.0416 | Recall: 0.9998 | FP: 295772 | TN: 747
+[Model 11] Precision: 0.0417 | Recall: 0.9998 | FP: 295525 | TN: 248
+[Model 12] Precision: 0.0417 | Recall: 0.9998 | FP: 295511 | TN: 14
+[Model 13] Precision: 0.0417 | Recall: 0.9998 | FP: 295444 | TN: 68
+[Model 14] Precision: 0.1369 | Recall: 0.9998 | FP: 81041 | TN: 214403
+[Model 15] Precision: 0.1370 | Recall: 0.9998 | FP: 80931 | TN: 286
+[Model 16] Precision: 0.1371 | Recall: 0.9998 | FP: 80881 | TN: 51
+[Model 17] Precision: 0.1371 | Recall: 0.9998 | FP: 80878 | TN: 3
+[Model 18] Precision: 0.1373 | Recall: 0.9998 | FP: 80759 | TN: 119
+[Model 19] Precision: 0.1391 | Recall: 0.9998 | FP: 79549 | TN: 1210
+[Model 20] Precision: 0.1391 | Recall: 0.9998 | FP: 79548 | TN: 1
+[Model 21] Precision: 0.1391 | Recall: 0.9998 | FP: 79546 | TN: 3
+[Model 22] Precision: 0.1391 | Recall: 0.9998 | FP: 79521 | TN: 43
+[Model 23] Precision: 0.1399 | Recall: 0.9998 | FP: 79014 | TN: 507
+[Model 24] Precision: 0.1454 | Recall: 0.9998 | FP: 75555 | TN: 3459
+[Model 25] Precision: 0.1454 | Recall: 0.9998 | FP: 75541 | TN: 15
+[Model 26] Precision: 0.1529 | Recall: 0.9998 | FP: 71169 | TN: 4372
+[Model 27] Precision: 0.1613 | Recall: 0.9998 | FP: 66812 | TN: 4357
+[Model 28] Precision: 0.1707 | Recall: 0.9998 | FP: 62428 | TN: 4385
+[Model 29] Precision: 0.1707 | Recall: 0.9998 | FP: 62428 | TN: 0
+[Model 30] Precision: 0.1707 | Recall: 0.9998 | FP: 62428 | TN: 1
+[Model 31] Precision: 0.1707 | Recall: 0.9998 | FP: 62428 | TN: 0
+[Model 32] Precision: 0.1707 | Recall: 0.9998 | FP: 62428 | TN: 0
+[Model 33] Precision: 0.1707 | Recall: 0.9998 | FP: 62428 | TN: 0
+[Model 34] Precision: 0.1707 | Recall: 0.9998 | FP: 62428 | TN: 0
+[Model 35] Precision: 0.1707 | Recall: 0.9998 | FP: 62428 | TN: 0
+[Model 36] Precision: 0.3938 | Recall: 0.9997 | FP: 19779 | TN: 42673
+[Model 37] Precision: 0.3967 | Recall: 0.9992 | FP: 19527 | TN: 2561
+[Model 38] Precision: 0.4281 | Recall: 0.9992 | FP: 17153 | TN: 2374
+[Model 39] Precision: 0.4329 | Recall: 0.9992 | FP: 16826 | TN: 327
+[Model 40] Precision: 0.4329 | Recall: 0.9992 | FP: 16825 | TN: 1
+[Model 41] Precision: 0.4344 | Recall: 0.9992 | FP: 16723 | TN: 102
+[Model 42] Precision: 0.4344 | Recall: 0.9992 | FP: 16723 | TN: 0
+[Model 43] Precision: 0.4344 | Recall: 0.9992 | FP: 16722 | TN: 1
+[Model 44] Precision: 0.4742 | Recall: 0.9992 | FP: 14239 | TN: 2483
+[Model 45] Precision: 0.5222 | Recall: 0.9992 | FP: 11749 | TN: 2490
+[Model 46] Precision: 0.5809 | Recall: 0.9992 | FP: 9265 | TN: 2484
+[Model 47] Precision: 0.5986 | Recall: 0.9992 | FP: 8610 | TN: 655
+[Model 48] Precision: 0.6026 | Recall: 0.9992 | FP: 8468 | TN: 142
+[Model 49] Precision: 0.6026 | Recall: 0.9992 | FP: 8468 | TN: 12
+[Model 50] Precision: 0.6508 | Recall: 0.9992 | FP: 6892 | TN: 1576
+[Model 51] Precision: 0.6508 | Recall: 0.9992 | FP: 6892 | TN: 0
+[Model 52] Precision: 0.7021 | Recall: 0.9992 | FP: 5448 | TN: 1444
+
+(threatrace) pesu-rf@pesu-rf-Precision-3680:~/aptGNN/scripts$ python evaluate_darpatc.py 
+Precision: 0.3583 | Recall: 0.4462 | F-Score: 0.3974

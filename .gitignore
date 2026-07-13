@@ -59,6 +59,7 @@ graphchi-cpp-master/graph_data/darpatc/*.json.*
 graphchi-cpp-master/graph_data/darpatc/*
 graphchi-cpp-master/graph_data/streamspot/*
 graphchi-cpp-master/graph_data/unicornsc/*
+datasets/
 
 # But keep the directory itself
 !graphchi-cpp-master/graph_data/darpatc/.gitkeep
