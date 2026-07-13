@@ -102,9 +102,18 @@ def _equal_count_chunks(provenance, num_windows, min_edges=1):
     num_windows = max(1, min(num_windows, n))
     size = max(1, n // num_windows)
     chunks = [provenance[i:i + size] for i in range(0, n, size)]
-    if len(chunks) > num_windows and len(chunks[-1]) < size // 2:
-        chunks[-2].extend(chunks[-1])
-        chunks.pop()
+
+    # range(0, n, size) yields ceil(n / size) chunks, which is num_windows +
+    # ceil((n % num_windows) / size) -- i.e. it can overshoot num_windows by
+    # one or more. Fold every surplus chunk into the last kept one. When the
+    # surplus is a single small tail (the only case that arises under
+    # MIN_WINDOW_EDGES) this is identical to merging that tail into
+    # chunks[-2], so window boundaries are unchanged for the shipped config.
+    if len(chunks) > num_windows:
+        surplus = chunks[num_windows:]
+        del chunks[num_windows:]
+        for extra in surplus:
+            chunks[-1].extend(extra)
     return chunks
 
 

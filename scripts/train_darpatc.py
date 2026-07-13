@@ -344,7 +344,7 @@ def validate(args, b_size, thre, graphId, device):
         recall    = _tp / len(nodeA)
         print(
             f'[Model {out_loop}] Precision: {precision:.4f} | Recall: {recall:.4f}'
-            f' | FP: {_fp} | FN: {len(tn)}'
+            f' | FP: {_fp} | TN: {len(tn)}'
         )
 
         if recall > 0.8 and precision > 0.7:

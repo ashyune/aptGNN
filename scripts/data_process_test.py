@@ -114,9 +114,15 @@ def MyDatasetA(path, model):
     feature_num *= 2
 
     # --- 2-hop neighbourhood expansion around ground-truth nodes ---
-    # neighbour  : flat set of all nodes within 2 hops of any nodeA member
-    # _neighbour : maps each such node to the list of nodeA ancestors
-    #              that reach it (used by evaluate_darpatc.py for TP scoring)
+    # neighbour  : flat set of all nodes within 2 hops (either direction) of
+    #              any nodeA member. Used by validate() as the FP rule:
+    #              an alarm outside this set is a false positive.
+    # _neighbour : maps each such node to the list of nodeA anchors it is
+    #              within 2 hops of. Used by validate() as the TP rule:
+    #              an alarm credits every anchor in its list as detected.
+    #              Both directions must be recorded here, otherwise the TP
+    #              rule and the FP rule disagree about what "within 2 hops"
+    #              means, and validate() stops matching evaluate_darpatc.py.
     neighbour = set()
     _neighbour = {}
 
@@ -137,9 +143,12 @@ def MyDatasetA(path, model):
         if i in adj2:
             for j in adj2[i]:
                 neighbour.add(j)
+                _neighbour.setdefault(j, set()).add(i)
+
                 if j in adj2:
                     for k in adj2[j]:
                         neighbour.add(k)
+                        _neighbour.setdefault(k, set()).add(i)
 
     _nodeA = list(neighbour)
     _neighbour = {node: list(anchors) for node, anchors in _neighbour.items()}
