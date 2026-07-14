@@ -9,80 +9,20 @@ import torch.nn.functional as F
 import numpy as np
 import subprocess
 from torch_geometric.loader import NeighborLoader
-from torch_geometric.nn import SAGEConv
 from data_process_train import MyDataset
 from data_process_test import MyDatasetA
+from model import SAGEMemNet
 
 thre_map = {"cadets": 1.5, "trace": 1.0, "theia": 1.5, "fivedirections": 1.0}
 NUM_WINDOWS = 3     # fixed chronological chunks per scene — 5 was too fine-
                     # grained for cadets: middle windows never stabilized
                     # before running out of refine-epoch budget
-MEM_DIM = 64        # size of the global cross-window memory vector
 
 
 def show(*s):
     ts = time.strftime("%H:%M:%S", time.localtime())
     msg = ' '.join(str(x) for x in s)
     print(f'[{ts}] {msg}')
-
-
-# ---------------------------------------------------------------------------
-# Model
-# ---------------------------------------------------------------------------
-
-class SAGEMemNet(torch.nn.Module):
-    """Two-layer GraphSAGE classifier + a persistent, GRU-updated GLOBAL
-    memory vector carried across time windows.
-
-    Why global rather than per-node: this vector is meant to transfer
-    between the training scene graph and the separate test scene graph
-    (validate()), which don't share a node-id space. A per-node memory
-    bank couldn't cross that boundary; a single "what has the whole
-    system looked like so far" vector can.
-
-    The memory update (readout + GRU) happens INSIDE forward(), before
-    broadcasting back into node features for classification -- so the
-    ordinary classification loss is what trains the GRU/readout weights.
-    Only the carried-over `state` tensor gets detached by the caller
-    between calls (truncated BPTT of depth 1), which is what keeps the
-    backward graph bounded no matter how many windows/batches a full
-    training run covers.
-
-    forward() accepts a NeighborLoader batch's x/edge_index plus the
-    incoming memory state, and returns (log_probs, updated_state). The
-    caller slices out[:batch.batch_size] before loss/accuracy/threshold
-    logic, same convention as before.
-    """
-    def __init__(self, in_channels, out_channels, mem_dim=MEM_DIM):
-        super().__init__()
-        self.mem_dim = mem_dim
-        self.conv1 = SAGEConv(in_channels, 32, normalize=False) #root_weight = false
-        self.readout = torch.nn.Linear(32, mem_dim)
-        self.readout_norm = torch.nn.LayerNorm(mem_dim)   # bounds the GRU's input
-        self.gru = torch.nn.GRUCell(mem_dim, mem_dim)
-        self.ctx_proj = torch.nn.Linear(mem_dim, 32)
-        # Learnable scalar gate (init near 0) so the context term starts as
-        # a no-op and the model only leans on memory once it's earned a
-        # role in the loss, instead of immediately swamping h with an
-        # untrained, potentially large ctx vector from step 1.
-        self.ctx_gate = torch.nn.Parameter(torch.tensor(-2.0))
-        self.conv2 = SAGEConv(32, out_channels, normalize=False)
-
-    def forward(self, x, edge_index, prev_state):
-        h = F.relu(self.conv1(x, edge_index))                       # [N, 32]
-
-        g = self.readout_norm(self.readout(h).mean(dim=0, keepdim=True))  # [1, mem_dim], bounded
-        new_state = torch.tanh(self.gru(g, prev_state))                  # keep state in [-1, 1]
-
-        ctx = self.ctx_proj(new_state).expand(h.size(0), -1)              # broadcast to every node
-        gate = torch.sigmoid(self.ctx_gate)                               # starts ~0.12, learns upward
-        h = F.dropout(h + gate * ctx, p=0.5, training=self.training)
-
-        out = self.conv2(h, edge_index)
-        return F.log_softmax(out, dim=1), new_state
-
-    def init_state(self, device):
-        return torch.zeros(1, self.mem_dim, device=device)
 
 
 # ---------------------------------------------------------------------------
@@ -120,7 +60,7 @@ def _predict_batch(model, batch, device, thre, state):
     new_state : [1, mem_dim] — memory state after seeing this batch
     """
     batch = batch.to(device)
-    out, new_state = model(batch.x, batch.edge_index, state)
+    out, new_state = model(batch.x, batch.edge_index, batch.edge_type, state)
 
     out    = out[:batch.batch_size]
     y_true = batch.y[:batch.batch_size]
@@ -154,7 +94,7 @@ def train(model, loader, optimizer, device, data, thre, state):
     for batch in loader:
         batch = batch.to(device)
         optimizer.zero_grad()
-        out, new_state = model(batch.x, batch.edge_index, state)
+        out, new_state = model(batch.x, batch.edge_index, batch.edge_type, state)
         loss = F.nll_loss(out[:batch.batch_size], batch.y[:batch.batch_size])
         loss.backward()
         optimizer.step()
@@ -273,7 +213,7 @@ def validate(args, b_size, thre, graphId, device):
         '../graphchi-cpp-master/graph_data/darpatc/'
         + args.scene + '_test.txt'
     )
-    data, feature_num, label_num, adj, adj2, nodeA, _nodeA, _neighbour = \
+    data, feature_num, label_num, adj, adj2, nodeA, _nodeA, _neighbour, num_relations = \
         MyDatasetA(path, 0)
 
     if len(nodeA) == 0:
@@ -281,7 +221,7 @@ def validate(args, b_size, thre, graphId, device):
         return 0
 
     print(data)
-    model = SAGEMemNet(feature_num, label_num).to(device)
+    model = SAGEMemNet(feature_num, label_num, num_relations).to(device)
     eps = 1e-10
 
     out_loop = -1
@@ -363,10 +303,11 @@ def train_pro(args, b_size, thre):
     graphId = 0
     device = torch.device('cpu')
 
-    windows, feature_num, label_num = MyDataset(path, NUM_WINDOWS)
-    show(f'feature {feature_num}; label {label_num}; {len(windows)} windows')
+    windows, feature_num, label_num, num_relations = MyDataset(path, NUM_WINDOWS)
+    show(f'feature {feature_num}; label {label_num}; '
+         f'{num_relations} relations; {len(windows)} windows')
 
-    model = SAGEMemNet(feature_num, label_num).to(device)
+    model = SAGEMemNet(feature_num, label_num, num_relations).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01,
                                  weight_decay=5e-4)
 

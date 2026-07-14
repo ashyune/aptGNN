@@ -8,48 +8,13 @@ import torch
 import time
 import torch.nn.functional as F
 from torch_geometric.loader import NeighborLoader
-from torch_geometric.nn import SAGEConv
 from data_process_test import MyDatasetA
-
-MEM_DIM = 64  # value used in train_darpatc.py
+from model import SAGEMemNet  # single source of truth, shared with train_darpatc.py
 
 
 def show(str_msg):
     ts = time.strftime("%H:%M:%S", time.localtime())
     print(f'[{ts}] {str_msg}')
-
-
-class SAGEMemNet(torch.nn.Module):
-    """Same architecture as train_darpatc.py's SAGEMemNet -- duplicated here
-    because this script is standalone and doesn't import from
-    train_darpatc.py.
-    """
-    def __init__(self, in_channels, out_channels, mem_dim=MEM_DIM):
-        super().__init__()
-        self.mem_dim = mem_dim
-        self.conv1 = SAGEConv(in_channels, 32, normalize=False)
-        self.readout = torch.nn.Linear(32, mem_dim)
-        self.readout_norm = torch.nn.LayerNorm(mem_dim)
-        self.gru = torch.nn.GRUCell(mem_dim, mem_dim)
-        self.ctx_proj = torch.nn.Linear(mem_dim, 32)
-        self.ctx_gate = torch.nn.Parameter(torch.tensor(-2.0))
-        self.conv2 = SAGEConv(32, out_channels, normalize=False)
-
-    def forward(self, x, edge_index, prev_state):
-        h = F.relu(self.conv1(x, edge_index))
-
-        g = self.readout_norm(self.readout(h).mean(dim=0, keepdim=True))
-        new_state = torch.tanh(self.gru(g, prev_state))
-
-        ctx = self.ctx_proj(new_state).expand(h.size(0), -1)
-        gate = torch.sigmoid(self.ctx_gate)
-        h = F.dropout(h + gate * ctx, p=0.5, training=self.training)
-
-        out = self.conv2(h, edge_index)
-        return F.log_softmax(out, dim=1), new_state
-
-    def init_state(self, device):
-        return torch.zeros(1, self.mem_dim, device=device)
 
 
 def _predict_batch(model, batch, device, thre, state):
