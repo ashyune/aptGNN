@@ -34,6 +34,7 @@ def MyDatasetA(path, model):
     provenance = []
     edge_s = []
     edge_e = []
+    edge_t = []
     adj = {}
     adj2 = {}
     nodeId_map = {}
@@ -79,6 +80,7 @@ def MyDatasetA(path, model):
 
             edge_s.append(temp[0])
             edge_e.append(temp[2])
+            edge_t.append(temp[4])
 
             adj.setdefault(temp[2], []).append(temp[0])
             adj2.setdefault(temp[0], []).append(temp[2])
@@ -100,6 +102,8 @@ def MyDatasetA(path, model):
         y[dstId] = dstType
 
     edge_index = torch.tensor([edge_s, edge_e], dtype=torch.long)
+    edge_type = torch.tensor(edge_t, dtype=torch.long)
+    num_relations = feature_num  # relation vocabulary size, before the *2 below
 
     # Only test_mask is used downstream; train_mask is omitted intentionally.
     test_mask = torch.ones(node_cnt, dtype=torch.bool)
@@ -108,6 +112,7 @@ def MyDatasetA(path, model):
         x=x,
         y=y,
         edge_index=edge_index,
+        edge_type=edge_type,
         test_mask=test_mask,
     )
 
@@ -144,4 +149,4 @@ def MyDatasetA(path, model):
     _nodeA = list(neighbour)
     _neighbour = {node: list(anchors) for node, anchors in _neighbour.items()}
 
-    return data, feature_num, label_num, adj, adj2, nodeA, _nodeA, _neighbour
+    return data, feature_num, label_num, adj, adj2, nodeA, _nodeA, _neighbour, num_relations

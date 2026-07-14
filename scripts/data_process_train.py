@@ -75,22 +75,40 @@ def _chronological_chunks(provenance, num_windows):
 
 
 def MyDataset(path, num_windows=1):
-    """Returns (windows, feature_num, label_num).
+    """Returns (windows, feature_num, label_num, num_relations).
 
     windows: list of Data objects, one per chronological window, sharing
     one global node vocabulary. x is CUMULATIVE (a node's edge-type
-    histogram keeps growing window over window); edge_index and the masks
-    are window-scoped (only edges/activity that happened in that window).
+    histogram keeps growing window over window); edge_index, edge_type,
+    and the masks are window-scoped (only edges/activity that happened
+    in that window).
+
+    edge_type: [num_edges] long tensor, parallel to edge_index, giving
+    the relation id of each edge (same vocabulary as num_relations /
+    the old feature.txt). This is what lets a downstream relation-aware
+    conv (e.g. RGCNConv) treat a Process->File edge differently from a
+    Process->Socket edge instead of every edge sharing one weight matrix.
+    NeighborLoader auto-subsets it during sampling since its first dim
+    matches num_edges, same mechanism as edge_index itself.
+
+    NOTE: x still encodes edge type too, as a per-node histogram of
+    "which relations has this node participated in" -- that's a useful
+    node feature independent of message passing and is left unchanged.
+    edge_type is the NEW thing: it lets message passing itself become
+    relation-aware, which x alone can never do (x is per-node, message
+    passing needs a per-edge signal).
 
     data.active_mask: nodes seen in this window OR any earlier window.
     Use this as train_mask/test_mask so we never score a node before it
     has appeared at least once.
 
     num_windows=1 reproduces the old single-snapshot behaviour exactly,
-    modulo the return signature (list-of-one instead of a bare Data).
+    modulo the return signature (list-of-one instead of a bare Data, and
+    the extra num_relations element).
     """
     provenance, node_cnt, edgeType_cnt, nodeType_cnt = _load_provenance(path)
     feature_num, label_num = edgeType_cnt, nodeType_cnt
+    num_relations = edgeType_cnt  # same vocabulary as the feature-histogram edge ids
 
     x = torch.zeros((node_cnt, feature_num * 2), dtype=torch.float)  # persists across windows
     y = torch.zeros(node_cnt, dtype=torch.long)
@@ -98,7 +116,7 @@ def MyDataset(path, num_windows=1):
 
     windows = []
     for chunk in _chronological_chunks(provenance, num_windows):
-        edge_s, edge_e = [], []
+        edge_s, edge_e, edge_t = [], [], []
         for temp in chunk:
             srcId, srcType, dstId, dstType, edge = temp
             x[srcId, edge] += 1
@@ -107,18 +125,20 @@ def MyDataset(path, num_windows=1):
             y[dstId] = dstType
             edge_s.append(srcId)
             edge_e.append(dstId)
+            edge_t.append(edge)
             seen[srcId] = True
             seen[dstId] = True
 
         edge_index = torch.tensor([edge_s, edge_e], dtype=torch.long)
+        edge_type = torch.tensor(edge_t, dtype=torch.long)
         active_mask = seen.clone()
 
         windows.append(Data(
-            x=x.clone(), y=y.clone(), edge_index=edge_index,
+            x=x.clone(), y=y.clone(), edge_index=edge_index, edge_type=edge_type,
             train_mask=active_mask.clone(),
             test_mask=active_mask.clone(),
             active_mask=active_mask.clone(),
         ))
 
     feature_num *= 2
-    return windows, feature_num, label_num
+    return windows, feature_num, label_num, num_relations
