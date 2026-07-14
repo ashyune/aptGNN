@@ -7,6 +7,7 @@ import shutil
 import glob
 from pathlib import Path
 
+
 def show(str_msg):
     ts = time.strftime("%H:%M:%S", time.localtime())
     print(f'[{ts}] {str_msg}')
@@ -24,7 +25,7 @@ for tar_name in tar_files:
     tar_path = osp.join('../graphchi-cpp-master/graph_data/darpatc', tar_name)
     if osp.exists(tar_path):
         with tarfile.open(tar_path, 'r:gz') as tar:
-            tar.extractall()
+            tar.extractall(filter="data")
 
 path_list = [
     'ta1-cadets-e3-official.json', 
