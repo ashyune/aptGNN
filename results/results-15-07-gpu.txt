@@ -1,0 +1,88 @@
+num windows = 4
+[20:29:52] Loading: ../graphchi-cpp-master/graph_data/darpatc/cadets_test.txt
+Data(x=[357174, 56], edge_index=[2, 4316489], y=[357174], test_mask=[357174])
+[Model 0] Precision: 0.0413 | Recall: 1.0000 | FP: 298323 | FN: 42892
+[Model 1] Precision: 0.0413 | Recall: 1.0000 | FP: 298132 | FN: 778
+[Model 2] Precision: 0.0424 | Recall: 1.0000 | FP: 290305 | FN: 8038
+[Model 3] Precision: 0.0425 | Recall: 1.0000 | FP: 289873 | FN: 965
+[Model 4] Precision: 0.0425 | Recall: 1.0000 | FP: 289854 | FN: 19
+[Model 5] Precision: 0.0425 | Recall: 1.0000 | FP: 289812 | FN: 42
+[Model 6] Precision: 0.0426 | Recall: 1.0000 | FP: 288524 | FN: 1288
+[Model 7] Precision: 0.0426 | Recall: 1.0000 | FP: 288495 | FN: 29
+[Model 8] Precision: 0.0429 | Recall: 1.0000 | FP: 287067 | FN: 1429
+[Model 9] Precision: 0.0430 | Recall: 1.0000 | FP: 286336 | FN: 924
+[Model 10] Precision: 0.0430 | Recall: 1.0000 | FP: 286334 | FN: 2
+[Model 11] Precision: 0.1517 | Recall: 1.0000 | FP: 71841 | FN: 215632
+[Model 12] Precision: 0.1518 | Recall: 1.0000 | FP: 71817 | FN: 24
+[Model 13] Precision: 0.1531 | Recall: 1.0000 | FP: 71113 | FN: 704
+[Model 14] Precision: 0.1538 | Recall: 1.0000 | FP: 70712 | FN: 401
+[Model 15] Precision: 0.1542 | Recall: 1.0000 | FP: 70495 | FN: 218
+[Model 16] Precision: 0.1542 | Recall: 1.0000 | FP: 70471 | FN: 24
+[Model 17] Precision: 0.1543 | Recall: 1.0000 | FP: 70464 | FN: 7
+[Model 18] Precision: 0.1543 | Recall: 1.0000 | FP: 70459 | FN: 5
+[Model 19] Precision: 0.1543 | Recall: 1.0000 | FP: 70459 | FN: 192
+[Model 20] Precision: 0.1543 | Recall: 1.0000 | FP: 70454 | FN: 155
+[Model 21] Precision: 0.1543 | Recall: 1.0000 | FP: 70442 | FN: 13
+[Model 22] Precision: 0.1543 | Recall: 0.9998 | FP: 70427 | FN: 82
+[Model 23] Precision: 0.1921 | Recall: 0.9998 | FP: 54047 | FN: 16380
+[Model 24] Precision: 0.1962 | Recall: 0.9998 | FP: 52652 | FN: 1395
+[Model 25] Precision: 0.2003 | Recall: 0.9998 | FP: 51285 | FN: 1367
+[Model 26] Precision: 0.2047 | Recall: 0.9998 | FP: 49918 | FN: 1367
+[Model 27] Precision: 0.2092 | Recall: 0.9998 | FP: 48563 | FN: 1355
+[Model 28] Precision: 0.2093 | Recall: 0.9998 | FP: 48550 | FN: 13
+[Model 29] Precision: 0.2093 | Recall: 0.9998 | FP: 48550 | FN: 0
+[Model 30] Precision: 0.2093 | Recall: 0.9998 | FP: 48543 | FN: 7
+[Model 31] Precision: 0.2093 | Recall: 0.9998 | FP: 48543 | FN: 0
+[Model 32] Precision: 0.2093 | Recall: 0.9998 | FP: 48543 | FN: 0
+[Model 33] Precision: 0.2093 | Recall: 0.9998 | FP: 48543 | FN: 0
+[Model 34] Precision: 0.2093 | Recall: 0.9998 | FP: 48543 | FN: 0
+[Model 35] Precision: 0.4864 | Recall: 0.9998 | FP: 13569 | FN: 34976
+[Model 36] Precision: 0.4868 | Recall: 0.9996 | FP: 13542 | FN: 62
+[Model 37] Precision: 0.5574 | Recall: 0.9996 | FP: 10201 | FN: 3342
+[Model 38] Precision: 0.7262 | Recall: 0.9996 | FP: 4844 | FN: 5358
+(threatrace) pesu-rf@pesu-rf-Precision-3680:~/aptGNN/scripts$ python3 test_darpatc.py --scene cadets
+[20:47:07] Start testing graph 1 in model 0
+[20:47:07] Loading: ../graphchi-cpp-master/graph_data/darpatc/cadets_test.txt
+[20:47:54] Using device: cuda
+[Model 0] Acc: 0.1201 | FP: 314282 | TN: 42892
+[Model 1] Acc: 0.0025 | FP: 313504 | TN: 778
+[Model 2] Acc: 0.0256 | FP: 305466 | TN: 8038
+[Model 3] Acc: 0.0032 | FP: 304501 | TN: 965
+[Model 4] Acc: 0.0001 | FP: 304482 | TN: 19
+[Model 5] Acc: 0.0001 | FP: 304440 | TN: 42
+[Model 6] Acc: 0.0042 | FP: 303152 | TN: 1288
+[Model 7] Acc: 0.0001 | FP: 303123 | TN: 29
+[Model 8] Acc: 0.0047 | FP: 301694 | TN: 1429
+[Model 9] Acc: 0.0031 | FP: 300770 | TN: 924
+[Model 10] Acc: 0.0000 | FP: 300768 | TN: 2
+[Model 11] Acc: 0.7169 | FP: 85136 | TN: 215632
+[Model 12] Acc: 0.0003 | FP: 85112 | TN: 24
+[Model 13] Acc: 0.0083 | FP: 84408 | TN: 704
+[Model 14] Acc: 0.0048 | FP: 84007 | TN: 401
+[Model 15] Acc: 0.0026 | FP: 83789 | TN: 218
+[Model 16] Acc: 0.0003 | FP: 83765 | TN: 24
+[Model 17] Acc: 0.0001 | FP: 83758 | TN: 7
+[Model 18] Acc: 0.0001 | FP: 83753 | TN: 5
+[Model 19] Acc: 0.0023 | FP: 83561 | TN: 192
+[Model 20] Acc: 0.0019 | FP: 83406 | TN: 155
+[Model 21] Acc: 0.0002 | FP: 83393 | TN: 13
+[Model 22] Acc: 0.0010 | FP: 83311 | TN: 82
+[Model 23] Acc: 0.1966 | FP: 66931 | TN: 16380
+[Model 24] Acc: 0.0208 | FP: 65536 | TN: 1395
+[Model 25] Acc: 0.0209 | FP: 64169 | TN: 1367
+[Model 26] Acc: 0.0213 | FP: 62802 | TN: 1367
+[Model 27] Acc: 0.0216 | FP: 61447 | TN: 1355
+[Model 28] Acc: 0.0002 | FP: 61434 | TN: 13
+[Model 29] Acc: 0.0000 | FP: 61434 | TN: 0
+[Model 30] Acc: 0.0001 | FP: 61427 | TN: 7
+[Model 31] Acc: 0.0000 | FP: 61427 | TN: 0
+[Model 32] Acc: 0.0000 | FP: 61427 | TN: 0
+[Model 33] Acc: 0.0000 | FP: 61427 | TN: 0
+[Model 34] Acc: 0.0000 | FP: 61427 | TN: 0
+[Model 35] Acc: 0.5694 | FP: 26451 | TN: 34976
+[Model 36] Acc: 0.0023 | FP: 26389 | TN: 62
+[Model 37] Acc: 0.1266 | FP: 23047 | TN: 3342
+[Model 38] Acc: 0.2325 | FP: 17689 | TN: 5358
+[20:51:56] Finish testing graph 1 in model 0
+(threatrace) pesu-rf@pesu-rf-Precision-3680:~/aptGNN/scripts$ python evaluate_darpatc.py --scene cadets
+Precision: 0.7262 | Recall: 0.9996 | F-Score: 0.8412
