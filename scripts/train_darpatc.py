@@ -376,7 +376,8 @@ def train_pro(args, b_size, thre, num_windows=NUM_WINDOWS):
         + args.scene + '_train.txt'
     )
     graphId = 0
-    device = torch.device('cpu')
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    show(f'Using device: {device}')
 
     windows, feature_num, label_num = MyDataset(path, num_windows, min_edges_per_window=MIN_WINDOW_EDGES)
     show(f'feature {feature_num}; label {label_num}; {len(windows)} windows (requested {num_windows})')
@@ -469,9 +470,23 @@ def main():
                               'reduced automatically if it would make windows '
                               f'thinner than MIN_WINDOW_EDGES ({MIN_WINDOW_EDGES} '
                               'edges) -- see the printed message at startup.')
+    parser.add_argument('--seed', type=int, default=None,
+                         help='Fix the random seed for reproducibility. Without '
+                              'this, weight init differs every run (and every '
+                              'retry inside the while-loop below), which is a '
+                              'major source of the run-to-run precision swings '
+                              'seen so far -- set this when comparing configs '
+                              '(e.g. edge-type-aware vs not) so differences in '
+                              'the result are attributable to the change being '
+                              'tested, not to which random draw you happened to get.')
     args = parser.parse_args()
     assert args.model in ['SAGE']
     assert args.scene in ['cadets', 'trace', 'theia', 'fivedirections']
+
+    if args.seed is not None:
+        torch.manual_seed(args.seed)
+        torch.cuda.manual_seed_all(args.seed)   # no-op if CUDA unavailable
+        show(f'Fixed random seed: {args.seed}')
 
     b_size = 5000
     thre   = thre_map[args.scene]
