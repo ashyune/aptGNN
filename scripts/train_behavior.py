@@ -79,6 +79,72 @@ def show(*s):
 # Model
 # ---------------------------------------------------------------------------
 
+class RelationalMemoryConv(torch.nn.Module):
+    """Extension 2: relation-aware read of neighbor memories.
+
+    Drop-in replacement for BehaviorNet's conv_mem (SAGEConv with
+    root_weight=False) that routes each neighbor's memory through a
+    per-relation transform BEFORE the mean aggregation:
+
+        SAGE : h_v = W * mean_{e=(u->v)} mem_u          + b
+        this : h_v = mean_{e=(u->v)} W_{rel(e)} * mem_u + b
+
+    With identical W_r for every relation the two are mathematically
+    equal (a shared linear commutes with the mean; asserted in
+    test_train_behavior.py), which keeps the E1-vs-E2 comparison clean:
+    same neighbors, same aggregation structure, same information flow --
+    only the read weights become relation-conditioned ("memory of my
+    parent process" is read differently from "memory of a file I read").
+    rel(e) is data.edge_type from windowed_data.py; the appended
+    self-loops carry their own dedicated relation id, so a node's own
+    memory gets its own read transform alongside lin_self.
+
+    Per-relation weights use RGCN-style basis decomposition
+    (W_r = sum_b coeff[r, b] * basis[b]): full per-relation matrices
+    would be 29 * 88 * 32 ~= 82k parameters bolted onto a ~8k-parameter
+    model; num_bases=8 keeps it ~23k.
+
+    Leakage guard (report 2026-07-14 SS5.3 point 3): edge types enter
+    ONLY multiplicatively against neighbor memory content -- there is
+    deliberately no per-relation bias and no edge-type embedding term --
+    so with memory zeroed every message is exactly zero regardless of
+    relation, the --max-norm 0 ablation still collapses to the static
+    type prior, and current-window edge types can route history but
+    cannot inject the node's own observed profile (the target) into its
+    prediction.
+
+    Implemented with plain index_add_ scatter (not MessagePassing) so
+    the aggregation semantics are explicit and version-stable.
+    """
+
+    def __init__(self, in_channels, out_channels, num_relations,
+                 num_bases=8):
+        super().__init__()
+        self.num_relations = num_relations
+        basis = torch.empty(num_bases, in_channels, out_channels)
+        for b in range(num_bases):
+            torch.nn.init.xavier_uniform_(basis[b])
+        self.basis = torch.nn.Parameter(basis)
+        coeff = torch.empty(num_relations, num_bases)
+        torch.nn.init.xavier_uniform_(coeff)
+        self.coeff = torch.nn.Parameter(coeff)
+        self.bias = torch.nn.Parameter(torch.zeros(out_channels))
+
+    def forward(self, x, edge_index, edge_type):
+        src, dst = edge_index
+        # Per-edge message = mem_src @ W_rel with W_r = sum_b c[r,b]*B_b,
+        # computed basis-first: msg_e = sum_b c[rel(e),b] * (mem_src @ B_b).
+        # Same math as materializing W[edge_type] ([E, in, out]) and
+        # batch-multiplying, but ~10x faster: the per-window transient is
+        # [N, bases, out] + [E, bases, out] instead of [E, in, out].
+        xb = torch.einsum('ni,bio->nbo', x, self.basis)
+        msgs = torch.einsum('eb,ebo->eo', self.coeff[edge_type], xb[src])
+        out = x.new_zeros(x.size(0), msgs.size(1)).index_add_(0, dst, msgs)
+        deg = x.new_zeros(x.size(0)).index_add_(
+            0, dst, torch.ones_like(dst, dtype=x.dtype)).clamp(min=1.0)
+        return out / deg.unsqueeze(1) + self.bias
+
+
 class BehaviorNet(torch.nn.Module):
     """Predict a node's current-window edge-type profile from history.
 
@@ -100,20 +166,36 @@ class BehaviorNet(torch.nn.Module):
 
     forward() deliberately has no `x` argument: the observed profile is
     the target, not an input.
+
+    Extension 2 (--relational): pass num_relations to swap conv_mem for
+    RelationalMemoryConv -- relation-aware routing of the SAME neighbor
+    memories over the SAME edges. Task, target, score, lin_self /
+    lin_type channels, and the zero-memory type-prior collapse are all
+    unchanged; forward() then requires the window's edge_type vector.
     """
 
-    def __init__(self, num_types, profile_dim, hidden_channels=32):
+    def __init__(self, num_types, profile_dim, hidden_channels=32,
+                 num_relations=None, num_bases=8):
         super().__init__()
         memory_dim = hidden_channels + profile_dim
         self.memory_dim = memory_dim
-        self.conv_mem = SAGEConv(memory_dim, hidden_channels,
-                                 normalize=False, root_weight=False)
+        self.relational = num_relations is not None
+        if self.relational:
+            self.conv_mem = RelationalMemoryConv(memory_dim, hidden_channels,
+                                                 num_relations, num_bases)
+        else:
+            self.conv_mem = SAGEConv(memory_dim, hidden_channels,
+                                     normalize=False, root_weight=False)
         self.lin_self = torch.nn.Linear(memory_dim, hidden_channels, bias=False)
         self.lin_type = torch.nn.Linear(num_types, hidden_channels)
         self.lin_out = torch.nn.Linear(hidden_channels, profile_dim)
 
-    def forward(self, type_onehot, memory, edge_index):
-        h = F.relu(self.conv_mem(memory, edge_index)
+    def forward(self, type_onehot, memory, edge_index, edge_type=None):
+        if self.relational:
+            agg = self.conv_mem(memory, edge_index, edge_type)
+        else:
+            agg = self.conv_mem(memory, edge_index)
+        h = F.relu(agg
                    + self.lin_self(memory)
                    + self.lin_type(type_onehot))
         h_dropped = F.dropout(h, p=0.5, training=self.training)
@@ -168,7 +250,7 @@ def train_one_epoch(model, dataset, node_memory, optimizer, device, num_types):
 
         optimizer.zero_grad()
         out, hidden = model(type_onehot(data.y, num_types), memory,
-                            data.edge_index)
+                            data.edge_index, data.edge_type)
         loss = profile_nll(out, data.x).mean()
         loss.backward()
         optimizer.step()
@@ -204,7 +286,7 @@ def evaluate_loss(model, dataset, node_memory, device, num_types,
         data = data.to(device)
         memory = node_memory.get_decayed(data.global_id, window_idx)
         out, hidden = model(type_onehot(data.y, num_types), memory,
-                            data.edge_index)
+                            data.edge_index, data.edge_type)
         total_loss += profile_nll(out, data.x).mean().item() * data.num_nodes
         total_nodes += data.num_nodes
         node_memory.update(data.global_id, make_writeback(hidden, data.x),
@@ -235,7 +317,7 @@ def evaluate_loss_zero_memory(model, dataset, device, num_types, memory_dim):
         data = data.to(device)
         zero_mem = torch.zeros(data.num_nodes, memory_dim, device=device)
         out, _ = model(type_onehot(data.y, num_types), zero_mem,
-                       data.edge_index)
+                       data.edge_index, data.edge_type)
         total_loss += profile_nll(out, data.x).mean().item() * data.num_nodes
         total_nodes += data.num_nodes
     return total_loss / total_nodes if total_nodes > 0 else 0.0
@@ -282,6 +364,18 @@ def main():
                         help='Chronological TAIL of the training windows '
                              'held out for checkpoint selection; the '
                              'test file is never read by this script.')
+    parser.add_argument('--relational', action='store_true',
+                        help='Extension 2: relation-aware routing of '
+                             'neighbor memories (per-edge-type read '
+                             'transforms via RGCN-style basis '
+                             'decomposition) in place of the shared '
+                             'SAGE aggregation. Task, target, score, '
+                             'and protocol are unchanged. Must match '
+                             'test_behavior.py.')
+    parser.add_argument('--rel-bases', type=int, default=8,
+                        help='Basis count for --relational '
+                             '(W_r = sum_b coeff[r,b] * basis[b]). '
+                             'Must match test_behavior.py.')
     parser.add_argument('--save-every-epoch', action='store_true',
                         help='Additionally save model_epoch<NNN>.pt each '
                              'epoch and log the per-epoch memory-utility '
@@ -327,7 +421,14 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     show(f'Device: {device}')
 
-    model = BehaviorNet(num_types, profile_dim, args.hidden_dim).to(device)
+    # +1: the self-loop relation id appended by build_window_data.
+    num_relations = len(feature_map) + 1 if args.relational else None
+    if args.relational:
+        show(f'Extension 2 ON: relational memory routing, '
+             f'{num_relations} relations, {args.rel_bases} bases')
+    model = BehaviorNet(num_types, profile_dim, args.hidden_dim,
+                        num_relations=num_relations,
+                        num_bases=args.rel_bases).to(device)
     node_memory = NodeMemory(len(node_vocab),
                              args.hidden_dim + profile_dim,
                              args.decay_rate,

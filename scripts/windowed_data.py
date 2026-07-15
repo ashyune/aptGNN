@@ -56,6 +56,13 @@ def build_window_data(window_rows, node_vocab, feature_map, label_map):
                      window's edges.
         y          : [num_local_nodes] node-type label.
         edge_index : [2, num_local_edges (+ self-loops)], LOCAL indices.
+        edge_type  : [num_local_edges (+ self-loops)] LongTensor; the
+                     feature_map relation id of each edge, aligned with
+                     edge_index. The appended self-loops are not CDM
+                     events and carry the dedicated relation id
+                     len(feature_map), so relation-aware consumers see
+                     num_relations = len(feature_map) + 1. Additive:
+                     the v1 stack never reads this field.
         global_id  : [num_local_nodes] LongTensor; global_id[i] is the
                      Stage 1 global node id for local node i. This is
                      the field Stage 3's memory manager keys on.
@@ -120,11 +127,18 @@ def build_window_data(window_rows, node_vocab, feature_map, label_map):
 
     edge_index = torch.tensor([edge_s, edge_e], dtype=torch.long)
     edge_index, _ = add_self_loops(edge_index, num_nodes=num_nodes)
+    # add_self_loops concatenates the num_nodes loop edges AFTER the real
+    # edges, so this relation vector stays aligned with edge_index by
+    # construction (asserted in test_windowed_data.py in case a PyG
+    # upgrade ever changes that). Self-loops get relation id feature_num.
+    edge_type = torch.tensor(edge_feat + [feature_num] * num_nodes,
+                             dtype=torch.long)
 
     return Data(
         x=x,
         y=y,
         edge_index=edge_index,
+        edge_type=edge_type,
         global_id=torch.tensor(global_id_list, dtype=torch.long),
     )
 

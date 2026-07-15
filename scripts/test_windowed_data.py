@@ -167,9 +167,40 @@ def test_self_loops_added_per_window():
     print('PASS: self_loops_added_per_window')
 
 
+def test_edge_type_aligned_with_edge_index():
+    """edge_type[i] must be the relation id of edge_index[:, i]: real
+    edges first, in row order, with their feature_map ids; then the
+    appended self-loops with the dedicated id len(feature_map). Guards
+    the add_self_loops append-at-end behaviour Extension 2's relational
+    routing relies on, in case a PyG upgrade ever changes it.
+    """
+    node_vocab = {'uuid-A': 1, 'uuid-B': 2, 'uuid-C': 3}
+    feature_map = {'EVENT_READ': 0, 'EVENT_WRITE': 1}
+    label_map = {'Process': 0, 'File': 1}
+    rows = [
+        ('uuid-A', 'Process', 'uuid-B', 'File', 'EVENT_READ', 100),
+        ('uuid-B', 'File', 'uuid-C', 'File', 'EVENT_WRITE', 200),
+        ('uuid-A', 'Process', 'uuid-C', 'File', 'EVENT_WRITE', 300),
+    ]
+
+    data = build_window_data(rows, node_vocab, feature_map, label_map)
+
+    assert data.edge_type.size(0) == data.edge_index.size(1)
+    # Real edges keep row order and their feature_map relation ids...
+    assert data.edge_type[:3].tolist() == [0, 1, 1]
+    src, dst = data.edge_index
+    assert src[:3].tolist() == [0, 1, 0] and dst[:3].tolist() == [1, 2, 2]
+    # ...then exactly one self-loop per node with the dedicated id.
+    loop_id = len(feature_map)
+    assert data.edge_type[3:].tolist() == [loop_id] * data.num_nodes
+    assert torch.equal(src[3:], dst[3:])
+    print('PASS: edge_type_aligned_with_edge_index')
+
+
 if __name__ == '__main__':
     test_single_window_matches_mydataset_construction()
     test_global_id_consistent_across_windows()
     test_type_filtering_matches_existing_behavior()
     test_self_loops_added_per_window()
+    test_edge_type_aligned_with_edge_index()
     print('All windowed_data checks passed.')

@@ -55,7 +55,7 @@ def score_dataset(model, dataset, node_memory, num_types):
         data = data.to(node_memory.device)
         memory = node_memory.get_decayed(data.global_id, window_idx)
         out, hidden = model(type_onehot(data.y, num_types), memory,
-                            data.edge_index)
+                            data.edge_index, data.edge_type)
         scores = profile_nll(out, data.x).cpu().tolist()
         gids = data.global_id.cpu().tolist()
         update_max_scores(score_by_gid, gids, scores)
@@ -82,6 +82,13 @@ def main():
     parser.add_argument('--max-norm', type=float, default=100.0,
                         help='Must match the frozen training config. 0 = '
                              'memory-off ablation (type-prior baseline).')
+    parser.add_argument('--relational', action='store_true',
+                        help='Extension 2 checkpoint: relation-aware '
+                             'memory routing. Must match the frozen '
+                             'training config (state_dict load fails '
+                             'loudly on a mismatch).')
+    parser.add_argument('--rel-bases', type=int, default=8,
+                        help='Must match the frozen training config.')
     parser.add_argument('--flag-quantile', type=float, default=0.999,
                         help='Operating point on the train max-score '
                              'distribution; affects the flag column only.')
@@ -137,7 +144,13 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     show(f'Device: {device}')
 
-    model = BehaviorNet(num_types, profile_dim, args.hidden_dim).to(device)
+    num_relations = len(feature_map) + 1 if args.relational else None
+    if args.relational:
+        show(f'Extension 2 ON: relational memory routing, '
+             f'{num_relations} relations, {args.rel_bases} bases')
+    model = BehaviorNet(num_types, profile_dim, args.hidden_dim,
+                        num_relations=num_relations,
+                        num_bases=args.rel_bases).to(device)
     model.load_state_dict(
         torch.load(checkpoint_path, map_location=device, weights_only=True))
     model.eval()
