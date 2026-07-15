@@ -97,6 +97,12 @@ def train(model, loader, optimizer, device, data, thre, state):
         out, new_state = model(batch.x, batch.edge_index, batch.edge_type, state)
         loss = F.nll_loss(out[:batch.batch_size], batch.y[:batch.batch_size])
         loss.backward()
+        # RGCNConv's per-relation weights (more parameters, more paths for
+        # a bad batch to produce a large gradient than SAGEConv had) were
+        # producing wild loss swings between consecutive epochs in window 1
+        # (51 -> 347 -> 1365 -> 328 -> ...). Clipping bounds the step size
+        # regardless of how large an individual batch's gradient gets.
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
         optimizer.step()
         total_loss += loss.item() * batch.batch_size
         state = new_state.detach()       # truncate BPTT at the batch boundary
@@ -393,8 +399,13 @@ def main():
         flag = validate(args, b_size, thre, graphId, device)
         if flag == 1:
             break
-        show('Validation failed — resetting models and retrying.')
-        _delete_all_model_files()
+        show('Validation failed at thre=' + str(thre) + '. Checkpoints are '
+             'being KEPT (not auto-deleted) -- if this keeps failing with '
+             'high recall/low precision OR the reverse, the problem is '
+             'likely the confidence-ratio threshold, not the model. Run '
+             'sweep_threshold.py against ../models/ before assuming the '
+             'model itself needs retraining.')
+        break  # stop after one failure instead of silently retraining loop
 
 
 if __name__ == '__main__':

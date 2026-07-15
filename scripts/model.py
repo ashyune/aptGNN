@@ -74,6 +74,20 @@ class SAGEMemNet(torch.nn.Module):
         self.conv2 = RGCNConv(32, out_channels, num_relations, num_bases=num_bases)
 
     def forward(self, x, edge_index, edge_type, prev_state):
+        # x is a cumulative per-node histogram of raw edge-type COUNTS
+        # (data_process_train.py/data_process_test.py never normalize it --
+        # it grows unboundedly window over window). Feeding raw counts
+        # straight into RGCNConv's per-relation weights is what produced
+        # the epoch-1 loss of ~1288 (sane random-init loss for 6 classes is
+        # ln(6)=~1.79) and the exploding/oscillating loss in later windows:
+        # large, unbounded inputs -> large logits -> numerically unstable
+        # softmax/backprop. log1p compresses large counts (a node with
+        # 10,000 EVENT_READs and one with 100 stop being 100x apart in
+        # scale) while preserving relative ordering and leaving zeros at
+        # zero. Applied here rather than in the data files so it's a single
+        # source of truth for both training and test-time forward passes.
+        x = torch.log1p(x)
+
         h = F.relu(self.conv1(x, edge_index, edge_type))                  # [N, 32]
 
         g = self.readout_norm(self.readout(h).mean(dim=0, keepdim=True))  # [1, mem_dim], bounded
