@@ -68,8 +68,16 @@ graphchi-cpp-master/graph_data/unicornsc/*
 # Example Models
 example_models/
 
-# Generated artifacts
-models/
+# Generated artifacts (checkpoints, score files, logs stay untracked),
+# but keep experiment drivers, preregistrations, and per-epoch metric
+# tables under models/ tracked. models/** + !models/**/ (instead of a
+# bare models/) lets git descend into the tree so the re-includes work.
+models/**
+!models/**/
+!models/**/*.sh
+!models/**/*.py
+!models/**/*.tsv
+!models/**/PREREGISTRATION.md
 result_*
 
 # Archives
