@@ -171,7 +171,8 @@ def main():
     data, feature_num, label_num, adj, adj2, nodeA, _nodeA, _neighbour = \
         MyDatasetA(path, args.model)
 
-    device = torch.device('cpu')
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    show(f'Using device: {device}')
     model  = SAGEMemNet(feature_num, label_num).to(device)
     thre   = thre_map[args.scene]
 
