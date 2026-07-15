@@ -121,9 +121,9 @@ class NodeMemory:
 
         Call this at the start of every independent pass through a window
         sequence from timestep 0 -- each training epoch, and separately
-        before a test-set evaluation pass (unless deliberately continuing
-        training's memory forward -- see train_windowed.py's
-        --continue-memory-into-test). Skipping this between epochs would
+        before a test-set scoring pass (a deliberate continuation, like
+        train_windowed.py evaluating its chronological validation tail
+        with reset=False, is the exception). Skipping this between epochs would
         let the last window of one epoch leak into the first window of
         the next as though it were "one window later", which isn't true
         (an epoch restarts the same real timeline from the beginning) and

@@ -56,17 +56,23 @@ following make_loader()'s pattern in train_darpatc.py -- confirm this is
 actually necessary first (see the validation instructions) before adding
 that complexity back.
 
-Train/test memory continuity is an open question, not a silent decision
---------------------------------------------------------------------------
-cadets_train.txt and cadets_test.txt come from separate source tars
-(ta1-cadets-e3-official vs ta1-cadets-e3-official-2 per parse_darpatc.py)
--- whether the test window sequence is genuinely the chronological
-continuation of the train sequence isn't something this code can verify.
-By default, NodeMemory resets between the train and test passes (treating
-them as two independent evaluations). --continue-memory-into-test
-switches to carrying the training memory's final state (and window-index
-clock) forward into testing instead, which is more faithful to a
-"deployed detector" scenario IF the timing is truly contiguous.
+Training never touches the test file (checkpoint-selection fix)
+-----------------------------------------------------------------
+Earlier versions of this script evaluated type-classification accuracy on
+the TEST windows after every epoch and picked best_model.pt by that
+number -- model selection on the evaluation data. That is gone: this
+script now reads only the training file. best_model.pt is selected on a
+chronological validation tail split off the END of the training window
+sequence (--val-fraction, default 0.1): after each epoch the tail is
+evaluated by continuing that epoch's memory and window clock forward into
+it (same file, genuinely contiguous time), and the epoch with the lowest
+validation NLL wins. With --val-fraction 0 the fallback criterion is
+lowest training loss. Test-time memory policy (cold start) lives entirely
+in test_windowed.py. The old --continue-memory-into-test option is gone:
+the cadets train and test files are measurably NOT contiguous (train ends
+2018-04-05 17:35 UTC, test begins 2018-04-11 20:36 UTC -- a six-day gap),
+so carrying the training memory's window-index clock into the test file
+was never sound.
 """
 
 import argparse
@@ -172,13 +178,13 @@ def train_one_epoch(model, dataset, node_memory, optimizer, device):
 def evaluate(model, dataset, node_memory, device, timestep_offset=0, reset=True):
     """Plain classification accuracy over *dataset*.
 
-    timestep_offset/reset exist for --continue-memory-into-test: when
-    continuing a NodeMemory instance from training straight into testing,
-    the caller passes reset=False and timestep_offset=len(train_dataset)
-    so the test windows' timesteps keep counting forward from where
-    training left off instead of restarting at 0. Does not (yet)
-    reproduce the baseline's confidence-ratio thresholding or
-    precision/recall pipeline -- see module docstring.
+    timestep_offset/reset exist for callers that continue an existing
+    NodeMemory forward instead of starting fresh -- main() uses this
+    shape (via evaluate_loss) for the chronological validation tail
+    (reset=False, timestep_offset=len(fit_windows)) so the tail's
+    timesteps keep counting forward from where the epoch's training pass
+    left off. Does not reproduce the baseline's confidence-ratio
+    thresholding or precision/recall pipeline -- see module docstring.
     """
     model.eval()
     if reset:
@@ -199,6 +205,37 @@ def evaluate(model, dataset, node_memory, device, timestep_offset=0, reset=True)
         node_memory.update(data.global_id, hidden.detach(), window_idx)
 
     return correct / total if total > 0 else 0.0
+
+
+@torch.no_grad()
+def evaluate_loss(model, dataset, node_memory, device, timestep_offset=0, reset=True):
+    """Mean NLL over *dataset* -- the checkpoint-selection criterion.
+
+    Same memory-threading semantics as evaluate(). Kept as a separate
+    function (rather than making evaluate() return a tuple) so existing
+    callers and tests of evaluate() keep its exact signature. NLL rather
+    than accuracy because type accuracy saturates within a couple of
+    epochs on this data, leaving selection to tie-breaking noise; the
+    loss still moves.
+    """
+    model.eval()
+    if reset:
+        node_memory.reset()
+    total_loss = 0.0
+    total_nodes = 0
+
+    for i, data in enumerate(dataset):
+        if data.num_nodes == 0:
+            continue
+        window_idx = timestep_offset + i
+        data = data.to(device)
+        memory = node_memory.get_decayed(data.global_id, window_idx)
+        out, hidden = model(data.x, data.edge_index, memory)
+        total_loss += F.nll_loss(out, data.y).item() * data.num_nodes
+        total_nodes += data.num_nodes
+        node_memory.update(data.global_id, hidden.detach(), window_idx)
+
+    return total_loss / total_nodes if total_nodes > 0 else 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -231,23 +268,27 @@ def main():
                              '(torch.save()-d list of Data, e.g. from '
                              'windowed_data.py --save) used instead of '
                              'rebuilding from the raw provenance file.')
-    parser.add_argument('--test-cache', type=str, default=None)
-    parser.add_argument('--continue-memory-into-test', action='store_true',
-                        help='Reuse the training NodeMemory for '
-                             'evaluation (continuing its window-index '
-                             'clock forward) instead of resetting. Only '
-                             'sensible if the test file is genuinely the '
-                             'chronological continuation of the training '
-                             'file -- see module docstring. Default: off.')
+    parser.add_argument('--max-norm', type=float, default=100.0,
+                        help='NodeMemory max_norm clamp. Must match what '
+                             'test_windowed.py is later run with. 0 makes '
+                             'every stored memory row all-zero, i.e. '
+                             'trains with memory disabled (the train-time '
+                             'ablation arm).')
+    parser.add_argument('--val-fraction', type=float, default=0.1,
+                        help='Fraction of training windows (chronological '
+                             'TAIL of the sequence) held out from '
+                             'gradient updates and used as the '
+                             'checkpoint-selection validation set. '
+                             '0 selects on training loss instead. The '
+                             'test file is never read by this script.')
     args = parser.parse_args()
 
     base = '../graphchi-cpp-master/graph_data/darpatc/'
     train_path = base + args.scene + '_train.txt'
-    test_path = base + args.scene + '_test.txt'
     node_vocab_path = args.node_vocab or f'../models/{args.scene}_node_vocab.txt'
     out_dir = args.out_dir or f'../models/windowed_{args.scene}'
 
-    for p in (train_path, test_path, node_vocab_path):
+    for p in (train_path, node_vocab_path):
         if not osp.exists(p):
             raise FileNotFoundError(f'Expected file not found: {p}')
     os.makedirs(out_dir, exist_ok=True)
@@ -273,15 +314,17 @@ def main():
         train_dataset = build_windowed_dataset(
             train_path, node_vocab, feature_map, label_map, args.window_size)
 
-    if args.test_cache:
-        show(f'Loading cached test windows: {args.test_cache}')
-        test_dataset = torch.load(args.test_cache, weights_only=False)
-    else:
-        show('Building test windows')
-        test_dataset = build_windowed_dataset(
-            test_path, node_vocab, feature_map, label_map, args.window_size)
-
-    show(f'{len(train_dataset)} train windows, {len(test_dataset)} test windows')
+    # Chronological validation tail (see module docstring): the LAST
+    # windows of the training sequence are excluded from gradient updates
+    # and used only as the checkpoint-selection criterion.
+    n_windows = len(train_dataset)
+    n_val = 0
+    if args.val_fraction > 0 and n_windows > 1:
+        n_val = min(n_windows - 1, max(1, int(round(args.val_fraction * n_windows))))
+    fit_windows = train_dataset[:n_windows - n_val]
+    val_windows = train_dataset[n_windows - n_val:]
+    show(f'{len(fit_windows)} fit windows, {n_val} validation windows '
+         f'(chronological tail of the training file)')
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     show(f'Device: {device}')
@@ -290,33 +333,33 @@ def main():
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr,
                                  weight_decay=args.weight_decay)
 
-    train_memory = NodeMemory(len(node_vocab), args.hidden_dim, args.decay_rate, device=device, max_norm=100.0)
-    if args.continue_memory_into_test:
-        test_memory = train_memory
-        test_offset = len(train_dataset)
-        test_reset = False
-        show('Evaluation will continue the training NodeMemory forward '
-             '(--continue-memory-into-test)')
-    else:
-        test_memory = NodeMemory(len(node_vocab), args.hidden_dim, args.decay_rate, device=device, max_norm=100.0)
-        test_offset = 0
-        test_reset = True
+    train_memory = NodeMemory(len(node_vocab), args.hidden_dim, args.decay_rate,
+                              device=device, max_norm=args.max_norm)
 
-    best_acc = -1.0
+    best_criterion = float('inf')
     for epoch in range(1, args.epochs + 1):
         t0 = time.time()
-        loss = train_one_epoch(model, train_dataset, train_memory, optimizer, device)
-        acc = evaluate(model, test_dataset, test_memory, device,
-                       timestep_offset=test_offset, reset=test_reset)
-        show(f'Epoch {epoch} | Loss: {loss:.4f} | Test Acc: {acc:.4f} '
-             f'| {time.time() - t0:.1f}s')
+        loss = train_one_epoch(model, fit_windows, train_memory, optimizer, device)
+        if n_val > 0:
+            # Continue this epoch's memory and window clock into the tail
+            # (same file, contiguous time) rather than resetting.
+            val_loss = evaluate_loss(model, val_windows, train_memory, device,
+                                     timestep_offset=len(fit_windows), reset=False)
+            criterion = val_loss
+            show(f'Epoch {epoch} | Train loss: {loss:.4f} | '
+                 f'Val loss: {val_loss:.4f} | {time.time() - t0:.1f}s')
+        else:
+            criterion = loss
+            show(f'Epoch {epoch} | Train loss: {loss:.4f} | '
+                 f'{time.time() - t0:.1f}s')
 
         torch.save(model.state_dict(), osp.join(out_dir, 'latest_model.pt'))
-        if acc > best_acc:
-            best_acc = acc
+        if criterion < best_criterion:
+            best_criterion = criterion
             torch.save(model.state_dict(), osp.join(out_dir, 'best_model.pt'))
 
-    show(f'Finished. Best test accuracy: {best_acc:.4f}')
+    label = 'validation' if n_val > 0 else 'training'
+    show(f'Finished. Best {label} loss: {best_criterion:.4f}')
 
 
 if __name__ == '__main__':
