@@ -60,7 +60,15 @@ class SAGEMemNet(torch.nn.Module):
         self.conv1 = HeteroConv({
             ('node', et, 'node'): SAGEConv(in_channels, 32, normalize=False)
             for et in self.edge_types
-        }, aggr='sum')
+        }, aggr='mean')   # mean, not sum: with 20+ relations now contributing
+                          # per node, summing let per-node activation scale
+                          # grow with how many relation types touched that
+                          # node, which reintroduced the kind of unbounded-
+                          # magnitude instability the LayerNorm/gate fix on
+                          # the memory pathway was built to prevent in the
+                          # first place. mean keeps a node's activation scale
+                          # roughly independent of how many edge types it
+                          # happens to participate in.
 
         self.readout = torch.nn.Linear(32, mem_dim)
         self.readout_norm = torch.nn.LayerNorm(mem_dim)
@@ -71,7 +79,7 @@ class SAGEMemNet(torch.nn.Module):
         self.conv2 = HeteroConv({
             ('node', et, 'node'): SAGEConv(32, out_channels, normalize=False)
             for et in self.edge_types
-        }, aggr='sum')
+        }, aggr='mean')
 
     def forward(self, x, edge_index_dict, prev_state):
         """x: plain [N, in_channels] tensor for the single 'node' type.
