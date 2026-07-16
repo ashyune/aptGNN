@@ -80,8 +80,8 @@ def MyDatasetA(path, model):
             edge_s.append(temp[0])
             edge_e.append(temp[2])
 
-            adj.setdefault(temp[2], []).append(temp[0])
-            adj2.setdefault(temp[0], []).append(temp[2])
+            adj.setdefault(temp[2], []).append(temp[0])   # incoming (backward)
+            adj2.setdefault(temp[0], []).append(temp[2])  # outgoing (forward)
 
             provenance.append(temp)
 
@@ -114,6 +114,7 @@ def MyDatasetA(path, model):
     feature_num *= 2
 
     # --- 2-hop neighbourhood expansion around ground-truth nodes ---
+
     # neighbour  : flat set of all nodes within 2 hops (either direction) of
     #              any nodeA member. Used by validate() as the FP rule:
     #              an alarm outside this set is a false positive.
@@ -123,6 +124,21 @@ def MyDatasetA(path, model):
     #              Both directions must be recorded here, otherwise the TP
     #              rule and the FP rule disagree about what "within 2 hops"
     #              means, and validate() stops matching evaluate_darpatc.py.
+    # neighbour  : flat set of all nodes within 2 hops of any nodeA member
+    #              (either direction) -- used for the plain FP filter.
+    # _neighbour : maps each such node to the list of nodeA ancestors
+    #              that reach it -- used by validate() to credit recall.
+    #
+    # FIX: the backward (adj) branch previously populated BOTH `neighbour`
+    # and `_neighbour`, while the forward (adj2) branch only populated
+    # `neighbour`. That made validate()'s recall-crediting silently
+    # backward-only, while test_darpatc.py's alarm-writing (and therefore
+    # evaluate_darpatc.py's final scoring) already credits both directions.
+    # This asymmetry meant a checkpoint could pass validate()'s in-training
+    # gate for reasons that don't hold up under the real, bidirectional
+    # evaluation -- both branches now populate _neighbour identically so
+    # validate() and evaluate_darpatc.py score TPs the same way.
+
     neighbour = set()
     _neighbour = {}
 
@@ -143,12 +159,16 @@ def MyDatasetA(path, model):
         if i in adj2:
             for j in adj2[i]:
                 neighbour.add(j)
-                _neighbour.setdefault(j, set()).add(i)
+
+                _neighbour.setdefault(j, set()).add(i)   # FIX: was missing
+
 
                 if j in adj2:
                     for k in adj2[j]:
                         neighbour.add(k)
-                        _neighbour.setdefault(k, set()).add(i)
+
+                        _neighbour.setdefault(k, set()).add(i)   # FIX: was missing
+
 
     _nodeA = list(neighbour)
     _neighbour = {node: list(anchors) for node, anchors in _neighbour.items()}
