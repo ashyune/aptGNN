@@ -1,5 +1,5 @@
 import torch
-from torch_geometric.data import Data
+from torch_geometric.data import HeteroData
 
 
 def _load_provenance(path):
@@ -10,11 +10,18 @@ def _load_provenance(path):
 
     Each raw line has 6 tab-separated fields:
         src_uuid  src_type  dst_uuid  dst_type  edge_type  timestamp_ns
-    timestamp_ns is a real Unix nanosecond timestamp (confirmed against
-    cadets_train.txt: 1522828474810632615 -> 2018-04-04, matches the
-    DARPA TC3 collection window). We keep it so provenance can be sorted
-    into GENUINE chronological order before windowing, instead of relying
-    on file line order as only an approximation of time order.
+    timestamp_ns is a real Unix nanosecond timestamp. We keep it so
+    provenance can be sorted into genuine chronological order before
+    windowing.
+
+    Returns edge_type_names as well: a list where edge_type_names[idx] is
+    the string name of edge-type idx, built from the SAME edgeType_map
+    written to feature.txt, in idx order (not dict insertion order, so
+    it's robust regardless of how the dict was populated). This is the
+    canonical relation-name ordering used to build HeteroConv's relation
+    set in train_darpatc.py -- MyDatasetA derives an equivalent list from
+    the same feature.txt file at test time, so train/test relation sets
+    always agree.
     """
     node_cnt = 0
     nodeType_cnt = 0
@@ -56,10 +63,6 @@ def _load_provenance(path):
 
             provenance.append([temp[0], temp[1], temp[2], temp[3], temp[4], ts_ns])
 
-    # Sort into genuine chronological order. Stable sort preserves original
-    # file order among any edges that share the exact same nanosecond
-    # timestamp (common here -- audit logs batch-write bursts of events
-    # under one timestamp), rather than shuffling ties arbitrarily.
     provenance.sort(key=lambda e: e[5])
 
     with open('../models/feature.txt', 'w') as f_feature:
@@ -69,27 +72,15 @@ def _load_provenance(path):
         for name, idx in nodeType_map.items():
             f_label.write(f'{name}\t{idx}\n')
 
-    return provenance, node_cnt, edgeType_cnt, nodeType_cnt
+    edge_type_names = [None] * edgeType_cnt
+    for name, idx in edgeType_map.items():
+        edge_type_names[idx] = name
+
+    return provenance, node_cnt, edgeType_cnt, nodeType_cnt, edge_type_names
 
 
 def _equal_count_chunks(provenance, num_windows, min_edges=1):
-    """Equal-sized chunks of the (now timestamp-sorted) edge list. We chunk
-    by count rather than by equal wall-clock duration: this dataset has
-    bursty, batched timestamps (many edges sharing the exact same
-    nanosecond), so fixed-duration bins risk producing empty or wildly
-    uneven windows. Equal-count chunking over truly sorted data still
-    gives genuine chronological windows without that risk.
-
-    min_edges: if the requested num_windows would make each window thinner
-    than this, num_windows is silently reduced until windows meet the
-    floor. This exists because a window's edge_index is what SAGEConv
-    actually message-passes over -- a window with too few edges gives the
-    model too little neighbourhood structure to learn from, independent of
-    how many total nodes are "active" (cumulative) in that window.
-
-    Merges a too-small tail chunk into the previous one so the last
-    window isn't a near-empty sliver.
-    """
+    """Equal-sized chunks of the (now timestamp-sorted) edge list."""
     n = len(provenance)
     if min_edges > 1 and num_windows > 1:
         max_windows_allowed = max(1, n // min_edges)
@@ -102,28 +93,38 @@ def _equal_count_chunks(provenance, num_windows, min_edges=1):
     num_windows = max(1, min(num_windows, n))
     size = max(1, n // num_windows)
     chunks = [provenance[i:i + size] for i in range(0, n, size)]
-    if len(chunks) > num_windows and len(chunks[-1]) < size // 2:
-        chunks[-2].extend(chunks[-1])
-        chunks.pop()
+
+    if len(chunks) > num_windows:
+        surplus = chunks[num_windows:]
+        del chunks[num_windows:]
+        for extra in surplus:
+            chunks[-1].extend(extra)
     return chunks
 
 
 def MyDataset(path, num_windows=1, min_edges_per_window=1):
-    """Returns (windows, feature_num, label_num).
+    """Returns (windows, feature_num, label_num, edge_type_names).
 
-    windows: list of Data objects, one per chronological window, sharing
-    one global node vocabulary. x is CUMULATIVE (a node's edge-type
-    histogram keeps growing window over window); edge_index and the masks
-    are window-scoped (only edges/activity that happened in that window).
+    windows: list of HeteroData objects, one per chronological window.
+    Single node type 'node'. One relation ('node', edge_type_name, 'node')
+    per distinct edge type -- only relations with at least one edge in a
+    given window are populated for that window's HeteroData object
+    (HeteroConv simply skips relations absent from edge_index_dict, so a
+    window missing a rare edge type is handled correctly, not an error).
 
-    data.active_mask: nodes seen in this window OR any earlier window.
-    Use this as train_mask/test_mask so we never score a node before it
-    has appeared at least once.
+    data['node'].x is CUMULATIVE across windows (unchanged from before);
+    per-relation edge_index is window-scoped.
 
-    num_windows=1 reproduces the old single-snapshot behaviour exactly,
-    modulo the return signature (list-of-one instead of a bare Data).
+    edge_type_names: the FULL global list of edge type names for this
+    scene (in canonical idx order), independent of which relations any
+    single window happens to populate. Pass this to the model constructor
+    so HeteroConv's relation set is fixed for the whole run, not
+    window-dependent -- this is what lets weights for a relation that
+    first appears in window 2 still exist (freshly initialized, untouched)
+    from window 0 onward.
     """
-    provenance, node_cnt, edgeType_cnt, nodeType_cnt = _load_provenance(path)
+    provenance, node_cnt, edgeType_cnt, nodeType_cnt, edge_type_names = \
+        _load_provenance(path)
     feature_num, label_num = edgeType_cnt, nodeType_cnt
 
     x = torch.zeros((node_cnt, feature_num * 2), dtype=torch.float)  # persists across windows
@@ -132,27 +133,37 @@ def MyDataset(path, num_windows=1, min_edges_per_window=1):
 
     windows = []
     for chunk in _equal_count_chunks(provenance, num_windows, min_edges=min_edges_per_window):
-        edge_s, edge_e = [], []
+        # Group this window's edges by type so each relation gets its own
+        # edge_index tensor.
+        per_type_edges = {}   # edge_type_idx -> ([src...], [dst...])
+
         for temp in chunk:
             srcId, srcType, dstId, dstType, edge, _ts_ns = temp
             x[srcId, edge] += 1
             y[srcId] = srcType
             x[dstId, edge + feature_num] += 1
             y[dstId] = dstType
-            edge_s.append(srcId)
-            edge_e.append(dstId)
             seen[srcId] = True
             seen[dstId] = True
 
-        edge_index = torch.tensor([edge_s, edge_e], dtype=torch.long)
+            s, d = per_type_edges.setdefault(edge, ([], []))
+            s.append(srcId)
+            d.append(dstId)
+
         active_mask = seen.clone()
 
-        windows.append(Data(
-            x=x.clone(), y=y.clone(), edge_index=edge_index,
-            train_mask=active_mask.clone(),
-            test_mask=active_mask.clone(),
-            active_mask=active_mask.clone(),
-        ))
+        data = HeteroData()
+        data['node'].x = x.clone()
+        data['node'].y = y.clone()
+        data['node'].train_mask = active_mask.clone()
+        data['node'].test_mask = active_mask.clone()
+        data['node'].active_mask = active_mask.clone()
+
+        for edge_type_idx, (s, d) in per_type_edges.items():
+            rel_name = edge_type_names[edge_type_idx]
+            data['node', rel_name, 'node'].edge_index = torch.tensor([s, d], dtype=torch.long)
+
+        windows.append(data)
 
     feature_num *= 2
-    return windows, feature_num, label_num
+    return windows, feature_num, label_num, edge_type_names

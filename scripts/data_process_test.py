@@ -1,13 +1,27 @@
 import time
 import torch
-from torch_geometric.data import Data
+from torch_geometric.data import HeteroData
 
 
 def show(s):
     ts = time.strftime("%H:%M:%S", time.localtime())
     print(f'[{ts}] {s}')
 
+
 def MyDatasetA(path, model):
+    """Returns (data, feature_num, label_num, adj, adj2, nodeA, _nodeA,
+    _neighbour, edge_type_names).
+
+    data is now a HeteroData object (single node type 'node', one relation
+    per edge type) mirroring MyDataset's structure, so the SAME model
+    class (built with the same edge_type_names) can be evaluated on it.
+
+    adj / adj2 / _neighbour remain type-agnostic flat dicts keyed by plain
+    node id -- these exist purely for the 2-hop ground-truth scoring used
+    by validate() and the alarm.txt writer in test_darpatc.py, which never
+    needed to distinguish edge types; only the message-passing structure
+    (edge_index) needed that distinction.
+    """
     feature_num = 0
     label_num = 0
 
@@ -25,6 +39,15 @@ def MyDatasetA(path, model):
             label_map[temp[0]] = int(temp[1])
             label_num += 1
 
+    # Canonical idx-ordered edge type name list, built from the SAME
+    # feature.txt that data_process_train.py wrote -- guarantees this
+    # matches MyDataset's edge_type_names exactly, so the HeteroConv
+    # relation set constructed at test time lines up with the trained
+    # checkpoint's relation set.
+    edge_type_names = [None] * feature_num
+    for name, idx in feature_map.items():
+        edge_type_names[idx] = name
+
     ground_truth = {}
     with open('groundtruth_uuid.txt', 'r') as f_gt:
         for line in f_gt:
@@ -32,8 +55,6 @@ def MyDatasetA(path, model):
 
     node_cnt = 0
     provenance = []
-    edge_s = []
-    edge_e = []
     adj = {}
     adj2 = {}
     nodeId_map = {}
@@ -77,9 +98,6 @@ def MyDatasetA(path, model):
             temp[3] = label_map[temp[3]]
             temp[4] = feature_map[temp[4]]
 
-            edge_s.append(temp[0])
-            edge_e.append(temp[2])
-
             adj.setdefault(temp[2], []).append(temp[0])   # incoming (backward)
             adj2.setdefault(temp[0], []).append(temp[2])  # outgoing (forward)
 
@@ -87,6 +105,7 @@ def MyDatasetA(path, model):
 
     x = torch.zeros((node_cnt, feature_num * 2), dtype=torch.float)
     y = torch.zeros(node_cnt, dtype=torch.long)
+    per_type_edges = {}   # edge_type_idx -> ([src...], [dst...])
 
     for temp in provenance:
         srcId   = temp[0]
@@ -99,35 +118,25 @@ def MyDatasetA(path, model):
         x[dstId, edge + feature_num] += 1
         y[dstId] = dstType
 
-    edge_index = torch.tensor([edge_s, edge_e], dtype=torch.long)
+        s, d = per_type_edges.setdefault(edge, ([], []))
+        s.append(srcId)
+        d.append(dstId)
 
-    # Only test_mask is used downstream; train_mask is omitted intentionally.
     test_mask = torch.ones(node_cnt, dtype=torch.bool)
 
-    data = Data(
-        x=x,
-        y=y,
-        edge_index=edge_index,
-        test_mask=test_mask,
-    )
+    data = HeteroData()
+    data['node'].x = x
+    data['node'].y = y
+    data['node'].test_mask = test_mask
+
+    for edge_type_idx, (s, d) in per_type_edges.items():
+        rel_name = edge_type_names[edge_type_idx]
+        data['node', rel_name, 'node'].edge_index = torch.tensor([s, d], dtype=torch.long)
 
     feature_num *= 2
 
     # --- 2-hop neighbourhood expansion around ground-truth nodes ---
-    # neighbour  : flat set of all nodes within 2 hops of any nodeA member
-    #              (either direction) -- used for the plain FP filter.
-    # _neighbour : maps each such node to the list of nodeA ancestors
-    #              that reach it -- used by validate() to credit recall.
-    #
-    # FIX: the backward (adj) branch previously populated BOTH `neighbour`
-    # and `_neighbour`, while the forward (adj2) branch only populated
-    # `neighbour`. That made validate()'s recall-crediting silently
-    # backward-only, while test_darpatc.py's alarm-writing (and therefore
-    # evaluate_darpatc.py's final scoring) already credits both directions.
-    # This asymmetry meant a checkpoint could pass validate()'s in-training
-    # gate for reasons that don't hold up under the real, bidirectional
-    # evaluation -- both branches now populate _neighbour identically so
-    # validate() and evaluate_darpatc.py score TPs the same way.
+    # (type-agnostic -- see module docstring)
     neighbour = set()
     _neighbour = {}
 
@@ -148,14 +157,14 @@ def MyDatasetA(path, model):
         if i in adj2:
             for j in adj2[i]:
                 neighbour.add(j)
-                _neighbour.setdefault(j, set()).add(i)   # FIX: was missing
+                _neighbour.setdefault(j, set()).add(i)
 
                 if j in adj2:
                     for k in adj2[j]:
                         neighbour.add(k)
-                        _neighbour.setdefault(k, set()).add(i)   # FIX: was missing
+                        _neighbour.setdefault(k, set()).add(i)
 
     _nodeA = list(neighbour)
     _neighbour = {node: list(anchors) for node, anchors in _neighbour.items()}
 
-    return data, feature_num, label_num, adj, adj2, nodeA, _nodeA, _neighbour
+    return data, feature_num, label_num, adj, adj2, nodeA, _nodeA, _neighbour, edge_type_names
