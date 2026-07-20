@@ -1,0 +1,67 @@
+num windows 4, seed 42
+
+[18:40:22] Loading: ../graphchi-cpp-master/graph_data/darpatc/cadets_test.txt
+Data(x=[357174, 56], edge_index=[2, 4316489], y=[357174], test_mask=[357174])
+[Model 0] Precision: 0.0398 | Recall: 1.0000 | FP: 310426 | FN: 30503
+[Model 1] Precision: 0.0405 | Recall: 1.0000 | FP: 304581 | FN: 5855
+[Model 2] Precision: 0.0408 | Recall: 1.0000 | FP: 302374 | FN: 2210
+[Model 3] Precision: 0.0410 | Recall: 1.0000 | FP: 300330 | FN: 2239
+[Model 4] Precision: 0.0413 | Recall: 0.9999 | FP: 298247 | FN: 2279
+[Model 5] Precision: 0.0413 | Recall: 0.9999 | FP: 297961 | FN: 443
+[Model 6] Precision: 0.0414 | Recall: 0.9999 | FP: 297630 | FN: 333
+[Model 7] Precision: 0.0414 | Recall: 0.9999 | FP: 297610 | FN: 501
+[Model 8] Precision: 0.0414 | Recall: 0.9999 | FP: 297484 | FN: 779
+[Model 9] Precision: 0.0414 | Recall: 0.9999 | FP: 297300 | FN: 486
+[Model 10] Precision: 0.0414 | Recall: 0.9999 | FP: 297292 | FN: 8
+[Model 11] Precision: 0.0415 | Recall: 0.9999 | FP: 296904 | FN: 388
+[Model 12] Precision: 0.0415 | Recall: 0.9999 | FP: 296896 | FN: 10
+[Model 13] Precision: 0.0417 | Recall: 0.9999 | FP: 295485 | FN: 2062
+[Model 14] Precision: 0.0418 | Recall: 0.9999 | FP: 294305 | FN: 1182
+[Model 15] Precision: 0.0418 | Recall: 0.9999 | FP: 294298 | FN: 35
+[Model 16] Precision: 0.0420 | Recall: 0.9999 | FP: 293389 | FN: 913
+[Model 17] Precision: 0.0420 | Recall: 0.9999 | FP: 293326 | FN: 64
+[Model 18] Precision: 0.0420 | Recall: 0.9999 | FP: 293295 | FN: 212
+[Model 19] Precision: 0.0420 | Recall: 0.9999 | FP: 293111 | FN: 184
+[Model 20] Precision: 0.0422 | Recall: 0.9999 | FP: 292010 | FN: 1106
+[Model 21] Precision: 0.0422 | Recall: 0.9998 | FP: 291984 | FN: 170
+[Model 22] Precision: 0.0422 | Recall: 0.9998 | FP: 291860 | FN: 124
+[Model 23] Precision: 0.0424 | Recall: 0.9998 | FP: 290130 | FN: 1731
+[Model 24] Precision: 0.0424 | Recall: 0.9998 | FP: 290033 | FN: 97
+[Model 25] Precision: 0.0425 | Recall: 0.9998 | FP: 289721 | FN: 312
+[Model 26] Precision: 0.0425 | Recall: 0.9995 | FP: 289709 | FN: 265
+[Model 27] Precision: 0.0425 | Recall: 0.9995 | FP: 289704 | FN: 32
+[Model 28] Precision: 0.0425 | Recall: 0.9995 | FP: 289699 | FN: 5
+[Model 29] Precision: 0.0425 | Recall: 0.9995 | FP: 289697 | FN: 2
+[Model 30] Precision: 0.0425 | Recall: 0.9995 | FP: 289696 | FN: 1
+[Model 31] Precision: 0.0425 | Recall: 0.9995 | FP: 289696 | FN: 0
+[Model 32] Precision: 0.1453 | Recall: 0.9995 | FP: 75572 | FN: 214124
+[Model 33] Precision: 0.1453 | Recall: 0.9995 | FP: 75563 | FN: 15
+[Model 34] Precision: 0.1453 | Recall: 0.9995 | FP: 75563 | FN: 34
+[Model 35] Precision: 0.1453 | Recall: 0.9995 | FP: 75562 | FN: 1
+[Model 36] Precision: 0.1455 | Recall: 0.9995 | FP: 75425 | FN: 145
+[Model 37] Precision: 0.1455 | Recall: 0.9995 | FP: 75415 | FN: 10
+[Model 38] Precision: 0.1564 | Recall: 0.9995 | FP: 69297 | FN: 6118
+[Model 39] Precision: 0.1565 | Recall: 0.9995 | FP: 69243 | FN: 103
+[Model 40] Precision: 0.1565 | Recall: 0.9995 | FP: 69242 | FN: 1
+[Model 41] Precision: 0.1565 | Recall: 0.9995 | FP: 69236 | FN: 6
+[Model 42] Precision: 0.1565 | Recall: 0.9995 | FP: 69236 | FN: 0
+[Model 43] Precision: 0.1565 | Recall: 0.9995 | FP: 69236 | FN: 0
+[Model 44] Precision: 0.1565 | Recall: 0.9995 | FP: 69236 | FN: 0
+[Model 45] Precision: 0.1565 | Recall: 0.9995 | FP: 69236 | FN: 0
+[Model 46] Precision: 0.1565 | Recall: 0.9995 | FP: 69236 | FN: 0
+[Model 47] Precision: 0.1565 | Recall: 0.9995 | FP: 69236 | FN: 0
+[Model 48] Precision: 0.1565 | Recall: 0.9995 | FP: 69234 | FN: 2
+[Model 49] Precision: 0.1565 | Recall: 0.9995 | FP: 69234 | FN: 0
+[Model 50] Precision: 0.1568 | Recall: 0.9995 | FP: 69084 | FN: 150
+[Model 51] Precision: 0.1568 | Recall: 0.9995 | FP: 69084 | FN: 0
+[Model 52] Precision: 0.1571 | Recall: 0.9995 | FP: 68920 | FN: 164
+[Model 53] Precision: 0.1833 | Recall: 0.9995 | FP: 57234 | FN: 11686
+[Model 54] Precision: 0.1835 | Recall: 0.9995 | FP: 57168 | FN: 66
+[Model 55] Precision: 0.1835 | Recall: 0.9995 | FP: 57165 | FN: 3
+[Model 56] Precision: 0.1835 | Recall: 0.9995 | FP: 57165 | FN: 0
+[Model 57] Precision: 0.4280 | Recall: 0.9995 | FP: 17170 | FN: 39999
+[Model 58] Precision: 0.4281 | Recall: 0.9995 | FP: 17163 | FN: 12797
+[Model 59] Precision: 0.6003 | Recall: 0.9995 | FP: 8552 | FN: 8613
+[Model 60] Precision: 0.8009 | Recall: 0.9995 | FP: 3194 | FN: 5384
+(threatrace) pesu-rf@pesu-rf-Precision-3680:~/aptGNN/scripts$ python evaluate_darpatc.py --scene cadets
+Precision: 0.8009 | Recall: 0.9995 | F-Score: 0.8892
