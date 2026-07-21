@@ -1,168 +1,251 @@
-# aptGNN — Setup & Run Guide
+# aptGNN — `aptgnn-final`
 
-Branch: `cwm-2`
-
-This README documents how to set up a fresh machine and reproduce every result
-(baseline, E1, E2, E3). See `reports/` for full write-ups of each experiment.
+Minimal, pruned branch containing exactly what's needed to reproduce E1
+(cross-window memory), E2 (relation-aware neighbor-memory routing), and E3
+(feature enrichment) on the CADETS scene, from a fresh clone. Branched off
+`cwm-2`; the diagnostics, rejected-experiment drivers, per-report writeups,
+deprecated ThreaTrace baseline, and the vendored GraphChi C++ toolkit that
+live on `cwm-2` are intentionally not here — see "What's deliberately not in
+this branch" below.
 
 ## 0. Setup (once per machine)
 
 ```bash
 git clone <repo-url>
 cd aptGNN
-git checkout cwm-2
+git checkout aptgnn-final
+conda env create -f environment.yml   # creates the `threatrace` env
 conda activate threatrace
 ```
 
-Confirm you're on the right commit:
+If you'd rather use plain pip into an existing env:
 
 ```bash
-git log --oneline -3
+pip install -r requirements.txt
 ```
 
-## 1. Data prep (one-time, slow)
+Either way you end up with `torch==2.12.0+cpu`, `torch-geometric==2.8.0`,
+`torch-scatter`, `torch-sparse`, `pyg-lib`, on Python 3.12.
 
-**Skip this entire step if `cadets_train.txt` / `cadets_test.txt` already exist**
-(e.g. copy them over from another machine instead of re-parsing ~15GB of raw
-tarballs — much faster).
+## 1. Data placement (required, not automated)
 
-If parsing from scratch is required:
+This branch does **not** version the parsed CADETS provenance files —
+`cadets_train.txt` and `cadets_test.txt` are ~580 MB each, over GitHub's
+100 MB per-file limit, and Git LFS is not set up for this repo. You must
+place them yourself before running anything:
 
-```bash
-cd scripts
-python parse_darpatc.py      # raw CDM JSON -> 6-column TSVs (slow)
-python node_vocab.py --scene cadets    # builds the global UUID -> node-id vocab
 ```
+graphchi-cpp-master/graph_data/darpatc/cadets_train.txt
+graphchi-cpp-master/graph_data/darpatc/cadets_test.txt
+```
+
+(See `graphchi-cpp-master/graph_data/darpatc/PLACE_DATA_HERE.md`, which is
+the only tracked file in that directory — it exists so the directory shows
+up in a fresh clone.)
+
+Two ways to get them there:
+
+- **Copy from another machine** that already has them (fastest — this is
+  the intended path; scp/rsync them in).
+- **Parse from scratch** from the raw DARPA TC CDM18 tarballs, if you have
+  them:
+  ```bash
+  cd scripts
+  python parse_darpatc.py                # raw JSON -> TSVs (slow, ~15GB of input)
+  python node_vocab.py --scene cadets     # rebuilds the vocab (already provided, see below -- only needed if you don't trust the committed one)
+  ```
+
+**Everything else needed is already in this branch**, actual data, not
+placeholders:
+- `models/cadets_node_vocab.txt` (30 MB) — the global UUID → node-id vocabulary
+- `models/windowed_cadets/groundtruth_raw_global_id.txt` — the 46 raw GT
+  UUIDs pre-resolved to global ids
+- `groundtruth/cadets_raw_uuid.txt`, `groundtruth/cadets.txt` — see §3 below
 
 ## 2. Run the experiments
 
-Use the driver scripts — they already have the correct seeds/flags baked in.
-Do not call `train_behavior.py` manually per-seed; use these instead.
+The three driver scripts already have the correct seeds/flags baked in —
+don't call `train_behavior.py` / `train_behavior_e3.py` by hand per seed.
+
+**Before running any of them**, open the script and hand-edit these two
+lines — they are hardcoded to the original development machine and were
+deliberately left that way rather than silently rewritten:
+
+```bash
+cd /home/tetsuya/aptGNN/scripts                       # <- change to your clone's scripts/ path
+source ~/miniconda3/etc/profile.d/conda.sh             # <- change to your conda install's profile.d path
+```
+
+All three of `models/behavior_cadets/seedrun/run_behavior_seedrun.sh`,
+`models/behavior_cadets/e2seedrun/run_e2_seedrun.sh`, and
+`models/behavior_cadets/e3seedrun/run_e3_seedrun.sh` have both lines near
+the top. If you don't edit them, the scripts will either `cd` into a path
+that doesn't exist on your machine or fail to activate the conda env, and
+fail loudly at the first command rather than silently using the wrong
+environment.
 
 ```bash
 # E1 — headline result: cross-window memory (SAGE read), + type-prior ablation
-bash ../models/behavior_cadets/seedrun/run_behavior_seedrun.sh
+bash models/behavior_cadets/seedrun/run_behavior_seedrun.sh
 
-# E2 — relational/heterogeneous extension (edge-type-aware neighbor-memory routing)
-bash ../models/behavior_cadets/e2seedrun/run_e2_seedrun.sh
+# E2 — relation-aware neighbor-memory routing
+bash models/behavior_cadets/e2seedrun/run_e2_seedrun.sh
 
 # E3 — feature enrichment (n_distinct / rep_ratio / span_frac added to the profile)
-bash ../models/behavior_cadets/e3seedrun/run_e3_seedrun.sh
+bash models/behavior_cadets/e3seedrun/run_e3_seedrun.sh
 ```
 
-Each script runs all 3 seeds {101, 202, 303} internally and writes scores +
-logs to its own directory (`seedrun/`, `e2seedrun/`, `e3seedrun/`).
+Each script runs all 3 seeds `{101, 202, 303}` internally, trains, scores
+the test set, and evaluates — no separate step needed. Expect roughly:
+E1 ~3 s/epoch × 30 epochs × 3 seeds, E2 ~12 s/epoch × 30 × 3 (relational
+routing is the slow one), E3 close to E1. All CPU (see §5).
 
-**Optional — diagnostic side-experiments, not needed for core paper numbers:**
+### Output locations
+
+- `models/behavior_cadets/seedrun/s<seed>/{mem,nomem}/eval/scores_windowed.txt`
+- `models/behavior_cadets/e2seedrun/s<seed>/eval/scores_windowed.txt`
+- `models/behavior_cadets/e3seedrun/s<seed>/eval/scores_windowed.txt`
+
+Each is one line per distinct test node: `<global_id> <score> <flag>`. Each
+`eval/` directory also gets a `groundtruth_global_id.txt` (expanded GT
+resolved for that run) and, after the driver's `calibrate_within_type.py`
+step, a `scores_windowed_caltype.txt`. Checkpoints (`best_model.pt`,
+`latest_model.pt`) land next to the training config, one level up from
+`eval/`. None of this is committed — it's all gitignored, regenerated by
+the driver scripts.
+
+To re-run evaluation against a score file directly, e.g. to double check a
+number:
 
 ```bash
-bash ../models/behavior_cadets/epochsweep/run_epochsweep.sh   # Δ-max checkpoint rule (rejected)
-bash ../models/behavior_cadets/aggscoring/run_aggscoring.sh    # window max/p95 aggregation (rejected)
-```
-
-## 3. Evaluate / verify numbers
-
-```bash
+cd scripts
 python evaluate_windowed.py \
-  --scores-file <path_to_scores> \
+  --scores-file ../models/behavior_cadets/seedrun/s101/mem/eval/scores_windowed.txt \
   --groundtruth-file ../models/windowed_cadets/groundtruth_raw_global_id.txt
 ```
 
-Should reproduce the AUPRC / AUROC / P@46 numbers already in
-`reports/2026-07-14_*`, `2026-07-16_*`, `2026-07-17_*`.
+## 3. Ground truth: raw vs. expanded
 
-Optional within-type calibrated variant (reported for protocol completeness;
-known to hurt all arms):
+Two variants of the CADETS ground truth are used, both present in this
+branch:
+
+- **Raw / conservative** (`groundtruth/cadets_raw_uuid.txt`, 72 labeled
+  attack-entity UUIDs; 46 resolve against this repo's parsed data via
+  `models/windowed_cadets/groundtruth_raw_global_id.txt`). Full provenance
+  and citation in `groundtruth/cadets_raw_SOURCE.md`. **This is the primary
+  evaluation target everywhere in this project.**
+- **2-hop expanded** (`groundtruth/cadets.txt`, 12,858 UUIDs; 12,852
+  resolve) — a neighborhood expansion around the raw entities, reported
+  alongside the raw set for comparability with systems evaluated under
+  neighborhood credit, but never optimized against. It measures structural
+  proximity to an attack, not attack membership, and scores as anti-signal
+  under this project's behavior-deviation model.
+
+`evaluate_windowed.py` never grants neighborhood/2-hop credit regardless of
+which GT file you point it at — a node only counts for itself.
+
+## 4. Sanity-check the code (optional but recommended on a new machine)
 
 ```bash
-python calibrate_within_type.py --scores-file <scores>
+cd scripts
+python test_train_behavior.py       # structural tests — E1/E2 (leakage guard, zero-memory collapse to type prior, etc.)
+python test_train_behavior_e3.py    # structural tests — E3
 ```
 
-## 4. Sanity-check the code itself (optional but recommended on a new machine)
+Both should pass with no errors before you trust a training run on a new
+machine/environment.
 
-```bash
-python test_train_behavior.py       # 16 structural tests — E1/E2
-python test_train_behavior_e3.py    # 9 structural tests — E3
+## 5. Hardware
+
+**Every number this pipeline has ever produced is CPU-only, by design.**
+`torch` in the `threatrace` env is CPU-only (`torch.cuda.is_available() ==
+False`). The model is tiny (~8k parameters for E1, ~23k for E2), so CPU is
+not a bottleneck — a full 3-seed run finishes in minutes. If you run this on
+a GPU machine, PyTorch will auto-select CUDA if available, which **may
+change results slightly**: seeded bit-exact reproducibility was only
+verified on CPU, and some GPU scatter/`index_add_` ops aren't deterministic
+the same way CPU ops are. Force CPU explicitly if you need results
+comparable to prior numbers.
+
+## What's in this branch
+
+```
+scripts/
+  parse_darpatc.py        Stage 0: raw CDM18 JSON -> TSVs
+  node_vocab.py            Stage 1: global UUID -> node-id vocab
+  windowing.py              library: time-sort + chunk into windows (imported only)
+  windowed_data.py          library: builds per-window PyG Data objects (imported only)
+  node_memory.py            library: cross-window per-node memory w/ decay (imported only)
+  train_windowed.py         v1 stack -- imported by test_windowed.py; not run directly by any driver here
+  test_windowed.py          shared scoring-protocol helpers, imported by test_behavior.py / test_behavior_e3.py
+  train_behavior.py         E1 / E2 trainer (E2 via --relational)
+  test_behavior.py          E1 / E2 scorer
+  window_features.py        library: E3's binned features (imported only)
+  train_behavior_e3.py      E3 trainer
+  test_behavior_e3.py       E3 scorer
+  evaluate_windowed.py      AUPRC / AUROC / P@|GT| + operating-point metrics vs a GT file
+  calibrate_within_type.py  within-type calibrated reporting variant
+  ranking_metrics.py        library: verified metric implementations (imported only)
+  test_train_behavior.py    structural unit tests -- E1/E2
+  test_train_behavior_e3.py structural unit tests -- E3
+
+models/
+  cadets_node_vocab.txt                              global UUID -> node-id vocab (data)
+  windowed_cadets/groundtruth_raw_global_id.txt        raw GT pre-resolved to global ids (data)
+  behavior_cadets/seedrun/run_behavior_seedrun.sh      E1 driver
+  behavior_cadets/e2seedrun/run_e2_seedrun.sh          E2 driver
+  behavior_cadets/e3seedrun/run_e3_seedrun.sh          E3 driver
+
+groundtruth/
+  cadets_raw_uuid.txt       raw/conservative GT (72 UUIDs)
+  cadets_raw_SOURCE.md      provenance + citations for the raw GT
+  cadets.txt                2-hop expanded GT (12,858 UUIDs)
+
+graphchi-cpp-master/graph_data/darpatc/PLACE_DATA_HERE.md   where to put cadets_train.txt / cadets_test.txt
+
+requirements.txt, environment.yml   dependency specs (unchanged from cwm-2)
 ```
 
-All should pass with no errors. These check leakage guards, ablation collapse
-to the type prior, etc. — not the experiment results themselves.
+## What's deliberately not in this branch
 
-## GPU note
+- The frozen/deprecated original ThreaTrace baseline (`data_process_train.py`,
+  `data_process_test.py`, `train_darpatc.py`, `test_darpatc.py`,
+  `evaluate_darpatc.py`, `setup.py`, `moniter.py`) and the unrelated
+  streamspot/unicornsc parsers and trainers — not used by E1/E2/E3.
+- Diagnostic and one-off analysis scripts (`d3-1.py`…`d6.py`,
+  `diagnose_*.py`, `diagnostic*.py`, `score_behavior_aggs.py`,
+  `analyze_e3.py`, `analyze_aggscoring.py`) and the rejected-experiment
+  drivers (`epochsweep/`, `aggscoring/`, `sweep/seedcheck/`) — historical
+  record on `cwm-2`, not needed to reproduce E1/E2/E3.
+  `test_*.py` unit tests other than `test_train_behavior*.py` (they cover
+  the individual library modules and are useful on `cwm-2` but weren't
+  carried over here to keep this branch to exactly what the three drivers
+  need).
+- The full experiment write-ups (`reports/2026-07-*.md`) — narrative
+  results and methodology discussion live on `cwm-2`, not duplicated here.
+- The vendored GraphChi C++ toolkit (`graphchi-cpp-master/{Makefile,bin,
+  src,toolkits,example_apps,conf,graphlab_toolkit_ports,graphchi_xcode}`)
+  — legacy code from the upstream ThreaTrace repo, never imported or
+  invoked by any script in this branch. Only the
+  `graphchi-cpp-master/graph_data/darpatc/` path survives, as the
+  conventional place the scripts look for the parsed TSVs.
+- Ground truth and any parsed data for theia/trace/fivedirections — those
+  scenes were never parsed in this repo; only CADETS has been run
+  end-to-end.
 
-**Every existing number in every report is CPU-only, by design — not an
-oversight.** `torch` in this env is CPU-only (`cuda.is_available() == False`).
-The model is tiny (~8–23k parameters, ~3s/epoch), so CPU is not a bottleneck.
+## Known rough edges (not fixed here, on purpose)
 
-If running on a GPU machine or a teammate's laptop with a GPU:
-- PyTorch will auto-select CUDA if available.
-- **This may change results slightly** — seeded bit-exact reproducibility was
-  only verified on CPU; some GPU ops (e.g. `index_add_`/scatter) are not
-  deterministic the same way CPU ops are.
-- To keep results comparable to existing reports, prefer forcing CPU explicitly
-  if the script exposes a `--device` flag (confirm before running on GPU).
-- The paper should state: **CPU, single machine, seeds {101, 202, 303}.**
+- The `'../graphchi-cpp-master/graph_data/darpatc/'` path convention is
+  kept as-is in this branch even though the C++ toolkit it's named after
+  is gone. Replacing it with a plain `data/` directory touches 9 files and
+  is a real but separate cleanup, deferred.
+- The three driver scripts' hardcoded `cd`/conda-activate lines are **not**
+  auto-fixed — see §2. Hand-edit them per machine.
 
-## File map (`scripts/`)
-
-### Current — reproduces paper numbers
-
-| File | Role |
-|---|---|
-| `parse_darpatc.py` | Stage 0: raw CDM JSON → TSVs |
-| `node_vocab.py` | Stage 1: global UUID → node-id vocab |
-| `windowing.py` | Library: time-sorts + chunks into windows (imported only) |
-| `windowed_data.py` | Library: builds per-window PyG `Data` objects (imported only) |
-| `node_memory.py` | Library: cross-window per-node memory w/ decay (imported only) |
-| `train_behavior.py` | **Headline model** (E1 / E2 via `--relational` flag) |
-| `test_behavior.py` | Scores test set under a frozen checkpoint |
-| `window_features.py` | Library: E3's binned features (imported only) |
-| `train_behavior_e3.py` / `test_behavior_e3.py` | E3 trainer/scorer |
-| `evaluate_windowed.py` | Computes AUPRC/AUROC/P@\|GT\| vs a GT file |
-| `calibrate_within_type.py` | Within-type calibrated reporting variant |
-| `ranking_metrics.py` | Library: verified metric implementations (imported only) |
-| `train_windowed.py` / `test_windowed.py` | v1 Extension-1 stack — the paper's v1 negative result; still current, shares protocol helpers |
-| `score_behavior_aggs.py` | Aggregation experiment scorer (rejected, kept for reproducibility) |
-| `test_*.py` (unit tests) | Structural guarantees — run directly with `python <file>` |
-
-**Note:** files named `test_windowed.py`, `test_behavior.py`, `test_behavior_e3.py`,
-`test_darpatc.py` are **scoring scripts** ("test" = test-set inference), NOT unit
-tests. The actual unit tests are `test_train_*.py` / `test_node_*.py` /
-`test_ranking_metrics.py` / etc.
-
-### Diagnostics — historical record, not needed for runs
-
-`diagnose_ground_truth_footprint.py`, `diagnostic2_alarm_footprint.py`,
-`diagnostic3_random_baseline.py`, `d3-1.py`, `d4.py`, `d5.py`, `d6.py`,
-`diagnose_feature_separation.py` — back specific report sections; kept for
-provenance.
-
-### Deprecated / frozen — never modify, not used by extension work
-
-Original ThreaTrace baseline: `data_process_train.py`, `data_process_test.py`,
-`train_darpatc.py`, `test_darpatc.py`, `evaluate_darpatc.py`, `setup.py`,
-`moniter.py`, plus streamspot/unicornsc parsers (datasets not on disk).
-
-Stray baseline **artifacts** (outputs, not code): `alarm.txt`,
-`groundtruth_nodeId.txt`, `groundtruth_uuid.txt`, `id_to_uuid.txt`,
-`training_log.txt`.
-
-## Ground truth
-
-Raw GT (`models/windowed_cadets/groundtruth_raw_global_id.txt`) derives from
-`groundtruth/cadets_raw_uuid.txt` (72 UUIDs; provenance documented in
-`groundtruth/cadets_raw_SOURCE.md`), resolved through the Stage-1 vocab.
-46 of 72 resolve into the dataset. **This is the raw/conservative protocol**,
-not the 2-hop expanded ground truth — see `reports/` for why that distinction
-matters.
-
-## Results summary
+## Results summary (for context; full analysis lives on `cwm-2`)
 
 | Experiment | Result |
 |---|---|
-| E1 (cross-window memory) | **Positive** — ~9× the type-prior ablation, reproducible across 3 seeds |
-| E2 (relational/heterogeneous routing) | **Null** — no reproducible detection improvement over E1, despite better validation-NLL |
-| E3 (feature enrichment) | **Mixed** — improves broad-rank detection (top ~200–1000), does not improve narrow top-46 precision |
-
-Full per-seed tables and methodology in `reports/2026-07-14` through
-`2026-07-17`.
+| E1 (cross-window memory) | Positive — ~9× the type-prior ablation, reproducible across 3 seeds |
+| E2 (relational/heterogeneous routing) | Null — no reproducible detection improvement over E1, despite better validation NLL |
+| E3 (feature enrichment) | Mixed — improves broad-rank detection (top ~200–1000), does not improve narrow top-46 precision |
