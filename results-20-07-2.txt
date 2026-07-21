@@ -1,0 +1,82 @@
+[20:21:27] Start validating
+[20:21:27] Loading: ../graphchi-cpp-master/graph_data/darpatc/cadets_test.txt
+HeteroData(
+  node={
+    x=[357174, 56],
+    y=[357174],
+    test_mask=[357174],
+  },
+  (node, EVENT_READ, node)={ edge_index=[2, 1418575] },
+  (node, EVENT_WRITE, node)={ edge_index=[2, 158997] },
+  (node, EVENT_EXIT, node)={ edge_index=[2, 25248] },
+  (node, EVENT_FORK, node)={ edge_index=[2, 26194] },
+  (node, EVENT_CLOSE, node)={ edge_index=[2, 702588] },
+  (node, EVENT_EXECUTE, node)={ edge_index=[2, 48816] },
+  (node, EVENT_OPEN, node)={ edge_index=[2, 427607] },
+  (node, EVENT_MMAP, node)={ edge_index=[2, 526854] },
+  (node, EVENT_MODIFY_PROCESS, node)={ edge_index=[2, 198461] },
+  (node, EVENT_LSEEK, node)={ edge_index=[2, 438421] },
+  (node, EVENT_CHANGE_PRINCIPAL, node)={ edge_index=[2, 41297] },
+  (node, EVENT_CREATE_OBJECT, node)={ edge_index=[2, 222264] },
+  (node, EVENT_SENDTO, node)={ edge_index=[2, 16775] },
+  (node, EVENT_RECVMSG, node)={ edge_index=[2, 785] },
+  (node, EVENT_TRUNCATE, node)={ edge_index=[2, 1085] },
+  (node, EVENT_UNLINK, node)={ edge_index=[2, 6629] },
+  (node, EVENT_CONNECT, node)={ edge_index=[2, 12463] },
+  (node, EVENT_ACCEPT, node)={ edge_index=[2, 12594] },
+  (node, EVENT_BIND, node)={ edge_index=[2, 35] },
+  (node, EVENT_SIGNAL, node)={ edge_index=[2, 179] },
+  (node, EVENT_RECVFROM, node)={ edge_index=[2, 15913] },
+  (node, EVENT_MODIFY_FILE_ATTRIBUTES, node)={ edge_index=[2, 6324] },
+  (node, EVENT_RENAME, node)={ edge_index=[2, 3614] },
+  (node, EVENT_FLOWS_TO, node)={ edge_index=[2, 242] },
+  (node, EVENT_FCNTL, node)={ edge_index=[2, 2104] },
+  (node, EVENT_SENDMSG, node)={ edge_index=[2, 398] },
+  (node, EVENT_LINK, node)={ edge_index=[2, 2025] },
+  (node, EVENT_OTHER, node)={ edge_index=[2, 2] }
+)
+[Model 0] Precision: 0.0431 | Recall: 0.9997 | FP: 285078 | TN: 53393
+[Model 1] Precision: 0.0439 | Recall: 0.9995 | FP: 279530 | TN: 5748
+[Model 2] Precision: 0.0443 | Recall: 0.9995 | FP: 277386 | TN: 2146
+[Model 3] Precision: 0.0443 | Recall: 0.9995 | FP: 277377 | TN: 11
+[Model 4] Precision: 0.0443 | Recall: 0.9995 | FP: 276867 | TN: 18950
+[Model 5] Precision: 0.0478 | Recall: 0.9995 | FP: 255782 | TN: 21091
+[Model 6] Precision: 0.0478 | Recall: 0.9995 | FP: 255684 | TN: 98
+[Model 7] Precision: 0.0478 | Recall: 0.9995 | FP: 255659 | TN: 25
+[Model 8] Precision: 0.0479 | Recall: 0.9995 | FP: 255334 | TN: 325
+[Model 9] Precision: 0.0479 | Recall: 0.9995 | FP: 255332 | TN: 3
+[Model 10] Precision: 0.0479 | Recall: 0.9995 | FP: 255331 | TN: 1
+[Model 11] Precision: 0.0479 | Recall: 0.9995 | FP: 255331 | TN: 0
+[Model 12] Precision: 0.0479 | Recall: 0.9995 | FP: 255302 | TN: 30
+[Model 13] Precision: 0.0479 | Recall: 0.9994 | FP: 255302 | TN: 1
+[Model 14] Precision: 0.0479 | Recall: 0.9994 | FP: 255278 | TN: 24
+[Model 15] Precision: 0.0479 | Recall: 0.9994 | FP: 255278 | TN: 0
+[Model 16] Precision: 0.0479 | Recall: 0.9994 | FP: 255278 | TN: 0
+[Model 17] Precision: 0.0479 | Recall: 0.9994 | FP: 255273 | TN: 11
+[Model 18] Precision: 0.0479 | Recall: 0.9994 | FP: 255269 | TN: 4
+[Model 19] Precision: 0.0479 | Recall: 0.9994 | FP: 255262 | TN: 7
+[Model 20] Precision: 0.0479 | Recall: 0.9994 | FP: 255262 | TN: 0
+[Model 21] Precision: 0.0479 | Recall: 0.9994 | FP: 255262 | TN: 0
+[Model 22] Precision: 0.0479 | Recall: 0.9994 | FP: 255262 | TN: 0
+[Model 23] Precision: 0.0479 | Recall: 0.9994 | FP: 255262 | TN: 0
+[Model 24] Precision: 0.0479 | Recall: 0.9994 | FP: 255262 | TN: 0
+[Model 25] Precision: 0.0479 | Recall: 0.9994 | FP: 255260 | TN: 2
+[Model 26] Precision: 0.0479 | Recall: 0.9994 | FP: 255260 | TN: 0
+[Model 27] Precision: 0.0479 | Recall: 0.9994 | FP: 255259 | TN: 1
+[Model 28] Precision: 0.0479 | Recall: 0.9994 | FP: 255258 | TN: 1
+[Model 29] Precision: 0.0479 | Recall: 0.9994 | FP: 255258 | TN: 1
+[Model 30] Precision: 0.0479 | Recall: 0.9994 | FP: 255257 | TN: 2
+[Model 31] Precision: 0.0479 | Recall: 0.9994 | FP: 255257 | TN: 0
+[Model 32] Precision: 0.0479 | Recall: 0.9994 | FP: 255257 | TN: 0
+[Model 33] Precision: 0.0479 | Recall: 0.9994 | FP: 255257 | TN: 0
+[Model 34] Precision: 0.0479 | Recall: 0.9994 | FP: 255257 | TN: 0
+[Model 35] Precision: 0.0565 | Recall: 0.9994 | FP: 214584 | TN: 40676
+[Model 36] Precision: 0.0565 | Recall: 0.9994 | FP: 214580 | TN: 5
+[Model 37] Precision: 0.0565 | Recall: 0.9994 | FP: 214441 | TN: 139
+[Model 38] Precision: 0.0565 | Recall: 0.9994 | FP: 214431 | TN: 10
+[Model 39] Precision: 0.0565 | Recall: 0.9994 | FP: 214426 | TN: 6
+[Model 40] Precision: 0.0565 | Recall: 0.9994 | FP: 214426 | TN: 0
+[Model 41] Precision: 0.0565 | Recall: 0.9994 | FP: 214426 | TN: 0
+[Model 42] Precision: 0.0565 | Recall: 0.9994 | FP: 214426 | TN: 0
+[Model 43] Precision: 0.0002 | Recall: 0.0035 | FP: 214426 | TN: 1
+[20:52:31] Validation failed — resetting models and retrying.

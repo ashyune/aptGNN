@@ -48,7 +48,7 @@ This generates the graph representation and feature-label files required for tra
 ### 2. Train the model
 
 ```bash
-python scripts/train_darpatc.py
+python scripts/train_darpatc.py --scene cadets --num_windows 4 --seed 42
 ```
 
 This trains the Graph Neural Network on the processed training data.
@@ -56,7 +56,8 @@ This trains the Graph Neural Network on the processed training data.
 ### 3. Evaluate the model
 
 ```bash
-python scripts/test_darpatc.py
+python scripts/test_darpatc.py --scene cadets --thre 1.0
+python scripts/evaluate_darpatc.py --scene cadets
 ```
 
 This evaluates the trained model on the test dataset and generates anomaly predictions.

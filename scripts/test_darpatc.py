@@ -69,9 +69,14 @@ def _predict_batch(model, batch, device, thre, state):
 
     Returns
     -------
-    pred   : [batch_size] — predicted class (100 = uncertain / below threshold)
-    y_true : [batch_size] — ground-truth labels for seed nodes only
-    n_ids  : [batch_size] — global node ids for seed nodes only
+    pred    : [batch_size] — predicted class (100 = uncertain / below threshold)
+    y_true  : [batch_size] — ground-truth labels for seed nodes only
+    n_ids   : [batch_size] — global node ids for seed nodes only
+    ratios  : [batch_size] — raw pro1/pro2 confidence ratio per node, BEFORE
+              thresholding. Returned so callers can inspect the distribution
+              directly (diagnostic for whether `thre` is well-calibrated for
+              this architecture) rather than only seeing the post-threshold
+              pred labels.
     """
     batch = batch.to(device)
     node_store = batch['node']
@@ -90,11 +95,14 @@ def _predict_batch(model, batch, device, thre, state):
         pro[i][pro1[1][i]] = -1
     pro2 = pro.max(1)
 
+    ratios = torch.full((bs,), float('inf'))
     for i in range(bs):
+        if pro2[0][i] > 0:
+            ratios[i] = pro1[0][i] / pro2[0][i]
         if pro2[0][i] <= 0 or pro1[0][i] / pro2[0][i] < thre:
             pred[i] = 100
 
-    return pred, y_true, n_ids
+    return pred, y_true, n_ids, ratios
 
 
 def make_loader(data, mask, b_size):
@@ -117,10 +125,12 @@ def run_test(model, data, b_size, device, thre, state):
     model.eval()
     fp, tn = [], []
     correct = 0
+    all_ratios = []
 
     with torch.no_grad():
         for batch in loader:
-            pred, y_true, n_ids = _predict_batch(model, batch, device, thre, state)
+            pred, y_true, n_ids, ratios = _predict_batch(model, batch, device, thre, state)
+            all_ratios.append(ratios[torch.isfinite(ratios)])
             for i in range(len(n_ids)):
                 nid = int(n_ids[i].item())
                 if y_true[i] != pred[i]:
@@ -128,6 +138,14 @@ def run_test(model, data, b_size, device, thre, state):
                 else:
                     tn.append(nid)
             correct += pred.eq(y_true).sum().item()
+
+    if all_ratios:
+        cat = torch.cat(all_ratios)
+        if cat.numel() > 0:
+            below = (cat < thre).float().mean().item()
+            show(f'  ratio stats: median={cat.median().item():.3f} '
+                 f'mean={cat.mean().item():.3f} '
+                 f'%below_thre({thre})={below * 100:.1f}%')
 
     denom = data['node'].test_mask.sum().item()
     acc = correct / denom if denom > 0 else 0.0
@@ -148,6 +166,14 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', type=str, default='0')
     parser.add_argument('--scene', type=str, default='')
+    parser.add_argument('--thre', type=float, default=None,
+                         help='Override the confidence-ratio threshold. Default '
+                              'is thre_map[scene] (tuned for the homogeneous '
+                              'model) -- the hetero model\'s output distribution '
+                              'may need a different value. This only affects '
+                              'inference-time thresholding, not the trained '
+                              'weights, so it can be swept against existing '
+                              'checkpoints without retraining.')
     args = parser.parse_args()
     assert args.scene in ['cadets', 'trace', 'theia', 'fivedirections'], (
         f"Unknown scene '{args.scene}'. "
@@ -172,7 +198,8 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     show(f'Using device: {device}')
     model  = SAGEMemNet(feature_num, label_num, edge_type_names).to(device)
-    thre   = thre_map[args.scene]
+    thre = args.thre if args.thre is not None else thre_map[args.scene]
+    show(f'Using confidence threshold: {thre}')
 
     model_indices = _find_model_indices()
     if not model_indices:

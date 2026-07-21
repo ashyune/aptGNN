@@ -459,6 +459,11 @@ def main():
                               'edges).')
     parser.add_argument('--seed', type=int, default=None,
                          help='Fix the random seed for reproducibility.')
+    parser.add_argument('--thre', type=float, default=None,
+                         help='Override the confidence-ratio threshold. Default '
+                              'is thre_map[scene] (tuned for the homogeneous '
+                              'model) -- the hetero model may need a different '
+                              'value.')
     args = parser.parse_args()
     assert args.model in ['SAGE']
     assert args.scene in ['cadets', 'trace', 'theia', 'fivedirections']
@@ -469,7 +474,8 @@ def main():
         show(f'Fixed random seed: {args.seed}')
 
     b_size = 5000
-    thre   = thre_map[args.scene]
+    thre   = args.thre if args.thre is not None else thre_map[args.scene]
+    show(f'Using confidence threshold: {thre}')
 
     src = f'../groundtruth/{args.scene}.txt'
     if not osp.exists(src):
